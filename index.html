@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>UPlan — Smart QRIS Finance Tracker</title>
+    <meta name="description" content="UPlan membantu Gen Z melacak pengeluaran QRIS harian, mengontrol impulse spending, dan mencapai target tabungan dengan smart budgeting.">
+    <meta name="theme-color" content="#0A0A0B">
+
+    <!-- Fonts & Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <!-- App Styles -->
+    <link rel="stylesheet" href="css/styles.css">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="U PLAN LOGO.png">
+</head>
+<body>
+    <!-- Sidebar Overlay (mobile) -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <!-- Sidebar (desktop) -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <img src="U PLAN LOGO.png" alt="UPlan Logo" class="sidebar-logo">
+            <div class="sidebar-brand-text">
+                <h1>UPlan</h1>
+                <p id="sidebarBudgetText">Daily Budget: Rp45.000 left</p>
+            </div>
+        </div>
+
+        <nav class="sidebar-nav" id="sidebarNav">
+            <a href="#dashboard" class="nav-item active" data-page="dashboard" id="nav-dashboard">
+                <i class="fas fa-th-large"></i>
+                <span>Dashboard</span>
+            </a>
+            <a href="#qris" class="nav-item" data-page="qris" id="nav-qris">
+                <i class="fas fa-qrcode"></i>
+                <span>QRIS Tracker</span>
+            </a>
+            <a href="#transactions" class="nav-item" data-page="transactions" id="nav-transactions">
+                <i class="fas fa-receipt"></i>
+                <span>Transactions</span>
+            </a>
+            <a href="#goals" class="nav-item" data-page="goals" id="nav-goals">
+                <i class="fas fa-bullseye"></i>
+                <span>Goals</span>
+            </a>
+            <a href="#insights" class="nav-item" data-page="insights" id="nav-insights">
+                <i class="fas fa-chart-line"></i>
+                <span>Insights</span>
+            </a>
+            <a href="#settings" class="nav-item" data-page="settings" id="nav-settings">
+                <i class="fas fa-cog"></i>
+                <span>Settings</span>
+            </a>
+        </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <header class="page-header">
+            <div class="flex items-center gap-md">
+                <button class="mobile-menu-btn" id="mobileMenuBtn">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <h2 id="pageTitle">Dashboard</h2>
+            </div>
+            <div class="header-actions">
+                <button class="btn-icon" id="notifBtn" title="Add Transaction">
+                    <i class="fas fa-plus"></i>
+                    <span class="notif-dot"></span>
+                </button>
+                <div class="avatar" id="userAvatar" title="Andy">A</div>
+            </div>
+        </header>
+
+        <div id="pageContent" class="page-content">
+            <!-- Pages rendered dynamically by app.js -->
+        </div>
+    </main>
+
+    <!-- Bottom Nav (Mobile) -->
+    <nav class="bottom-nav" id="bottomNav">
+        <a href="#dashboard" class="bottom-nav-item active" data-page="dashboard">
+            <i class="fas fa-th-large"></i>
+            <span>Home</span>
+        </a>
+        <a href="#qris" class="bottom-nav-item" data-page="qris">
+            <i class="fas fa-qrcode"></i>
+            <span>QRIS</span>
+        </a>
+        <a href="#transactions" class="bottom-nav-item" data-page="transactions">
+            <i class="fas fa-receipt"></i>
+            <span>Activity</span>
+        </a>
+        <a href="#goals" class="bottom-nav-item" data-page="goals">
+            <i class="fas fa-bullseye"></i>
+            <span>Goals</span>
+        </a>
+        <a href="#insights" class="bottom-nav-item" data-page="insights">
+            <i class="fas fa-chart-line"></i>
+            <span>Insights</span>
+        </a>
+    </nav>
+
+    <!-- Floating Scan Button -->
+    <button class="btn-scan-float" id="btnScanFloat" title="Scan QRIS Screenshot">
+        <i class="fas fa-camera"></i>
+        <span>Scan QRIS Screenshot</span>
+    </button>
+
+    <!-- Modal Overlay -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal" id="modalContainer">
+            <!-- Modal content injected by JS -->
+        </div>
+    </div>
+
+    <!-- App Script -->
+    <script src="js/app.js"></script>
+</body>
+</html>
