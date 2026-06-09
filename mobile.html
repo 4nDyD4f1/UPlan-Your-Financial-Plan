@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+    <title>UPlan — Smart QRIS Finance Tracker</title>
+    <meta name="description" content="UPlan membantu Gen Z melacak pengeluaran QRIS harian.">
+    <meta name="theme-color" content="#0A0A0B">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="UPlan">
+    <link rel="apple-touch-icon" href="U PLAN LOGO.png">
+    <link rel="manifest" href="manifest.json">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="css/mobile.css">
+    <link rel="icon" type="image/png" href="U PLAN LOGO.png">
+</head>
+<body>
+    <div class="app" id="app">
+        <!-- Top Header -->
+        <header class="app-header" id="appHeader">
+            <div class="header-left">
+                <div class="header-greeting">
+                    <span class="greeting-sub" id="greetingText">Good Morning 👋</span>
+                    <span class="greeting-name" id="userName">Andy</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <button class="hdr-btn" id="btnAddTx"><i class="fas fa-plus"></i></button>
+                <div class="hdr-avatar" id="hdrAvatar">A</div>
+            </div>
+        </header>
+
+        <!-- Page Container -->
+        <main class="app-body" id="appBody">
+            <!-- Pages injected by JS -->
+        </main>
+
+        <!-- Bottom Tab Bar -->
+        <nav class="tab-bar" id="tabBar">
+            <button class="tab active" data-page="home" id="tab-home">
+                <i class="fas fa-home"></i>
+                <span>Home</span>
+            </button>
+            <button class="tab" data-page="qris" id="tab-qris">
+                <i class="fas fa-qrcode"></i>
+                <span>QRIS</span>
+            </button>
+            <button class="tab tab-center" id="tabCenter">
+                <div class="tab-center-btn">
+                    <i class="fas fa-camera"></i>
+                </div>
+                <span>Scan</span>
+            </button>
+            <button class="tab" data-page="goals" id="tab-goals">
+                <i class="fas fa-bullseye"></i>
+                <span>Goals</span>
+            </button>
+            <button class="tab" data-page="profile" id="tab-profile">
+                <i class="fas fa-user"></i>
+                <span>Profile</span>
+            </button>
+        </nav>
+    </div>
+
+    <!-- Bottom Sheet Modal -->
+    <div class="sheet-overlay" id="sheetOverlay">
+        <div class="sheet" id="sheetContainer">
+            <div class="sheet-handle"></div>
+            <div id="sheetContent"></div>
+        </div>
+    </div>
+
+    <script src="js/mobile-app.js"></script>
+</body>
+</html>
