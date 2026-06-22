@@ -214,23 +214,35 @@ function extractMerchant(text: string): string {
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 2);
   
   // Common patterns for merchant name in receipts
-  const skipWords = /^(total|jumlah|bayar|tanggal|date|waktu|time|no\.|ref|resi|struk|receipt|kasir|cashier|change|kembalian|tunai|cash|debit|kredit|credit|qris|dana|gopay|ovo|shopeepay|linkaja|\d+$)/i;
+  const skipWords = /^(total|jumlah|bayar|tanggal|date|waktu|time|no\.|ref|resi|struk|receipt|kasir|cashier|change|kembalian|tunai|cash|debit|kredit|credit|qris|dana|gopay|ovo|shopeepay|linkaja|rincian|berhasil|sukses|status|metode|\d+$)/i;
   
-  // Look for "Kepada:" or "Merchant:" or "Nama:" patterns
+  // 1. Look for single-line "Kepada: MerchantName"
   for (const line of lines) {
-    const merchantMatch = line.match(/(?:kepada|merchant|nama|to|tujuan|penerima)\s*[:\s]+(.+)/i);
+    const merchantMatch = line.match(/(?:kepada|merchant|nama|to|tujuan|penerima|bayar ke)\s*[:]+\s*(.+)/i);
     if (merchantMatch) {
       const name = merchantMatch[1].trim();
       if (name.length > 1) return name;
     }
   }
 
-  // First non-skip line that looks like a name (usually the merchant name is at the top)
+  // 2. Look for two-line "Bayar Ke \n MerchantName" (ShopeePay/Gopay style)
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (/(?:kepada|merchant|nama|to|tujuan|penerima|bayar ke)/i.test(lines[i])) {
+      const nextLine = lines[i + 1].trim();
+      if (nextLine.length > 1 && !skipWords.test(nextLine)) {
+        return nextLine;
+      }
+    }
+  }
+
+  // 3. Fallback: First non-skip line that looks like a name
   for (const line of lines) {
-    if (line.length > 2 && line.length < 50 && !skipWords.test(line) && !/^\d+$/.test(line)) {
-      // Check it's not just numbers and symbols
-      if (/[a-zA-Z]/.test(line)) {
-        return line;
+    // Remove symbols like '<', '>', '-', etc that might be attached
+    const cleanLine = line.replace(/^[<>\-=\s]+|[<>\-=\s]+$/g, '');
+    
+    if (cleanLine.length > 2 && cleanLine.length < 50 && !skipWords.test(cleanLine) && !/^\d+$/.test(cleanLine)) {
+      if (/[a-zA-Z]/.test(cleanLine)) {
+        return cleanLine;
       }
     }
   }

@@ -53,6 +53,7 @@ export default function DashboardScreen() {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [scanMerchant, setScanMerchant] = useState('');
   const [scanAmount, setScanAmount] = useState('');
+  const [scanCategory, setScanCategory] = useState('other');
   
   const [manualMerchant, setManualMerchant] = useState('');
   const [manualAmount, setManualAmount] = useState('');
@@ -65,6 +66,7 @@ export default function DashboardScreen() {
   const handleScanComplete = (data: any) => {
     setScanMerchant(data.merchant || '');
     setScanAmount(data.amount ? data.amount.toString() : '');
+    setScanCategory(data.category || 'other');
     setShowConfirmModal(true);
   };
 
@@ -83,7 +85,7 @@ export default function DashboardScreen() {
       user_id: user.id,
       amount: amt,
       merchant_name: scanMerchant.trim() || 'Unknown',
-      category: 'other',
+      category: scanCategory,
       payment_method: 'qris',
       note: 'Via OCR Scan',
       receipt_url: null,
@@ -380,6 +382,19 @@ export default function DashboardScreen() {
                   <Text style={[styles.label, { color: theme.textSecondary }]}>Nominal (Rp)</Text>
                   <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
                     value={scanAmount} onChangeText={setScanAmount} placeholder="50000" placeholderTextColor={theme.textMuted} keyboardType="numeric" />
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>Kategori</Text>
+                  <View style={styles.categoryRow}>
+                    {Object.entries(CATEGORIES).slice(0, 4).map(([key, cat]) => (
+                      <TouchableOpacity key={key} style={[styles.catBadge, scanCategory === key && { backgroundColor: cat.bgColor, borderColor: cat.color }]}
+                        onPress={() => setScanCategory(key)}>
+                        <FontAwesome6 name={cat.icon} size={12} color={scanCategory === key ? cat.color : theme.textMuted} />
+                        <Text style={[styles.catText, { color: scanCategory === key ? cat.color : theme.textMuted }]}>{cat.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                 </View>
                 
                 <TouchableOpacity style={styles.saveBtn} onPress={handleSaveScan} activeOpacity={0.7}>
