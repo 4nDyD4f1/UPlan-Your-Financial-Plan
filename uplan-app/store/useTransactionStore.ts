@@ -1,10 +1,20 @@
 /**
- * UPlan — Transaction Store (Zustand)
- * CRUD transactions via Supabase with Realtime subscription
+ * UPlan — Transaction & Goal Store (Zustand)
+ * Uses database.ts for persistent SQLite-backed storage.
  */
 
 import { create } from 'zustand';
-import { supabase, type DBTransaction, type DBGoal } from '../lib/supabase';
+import {
+  getTransactions,
+  insertTransaction,
+  deleteTransaction as dbDeleteTransaction,
+  getGoals,
+  insertGoal,
+  updateGoal as dbUpdateGoal,
+  deleteGoal as dbDeleteGoal,
+  type DBTransaction,
+  type DBGoal,
+} from '../lib/database';
 
 interface TransactionState {
   transactions: DBTransaction[];
@@ -34,21 +44,15 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
   loading: false,
   syncing: false,
 
-  // --- Transactions ---
+  // ─── Transactions ──────────────────────────────────────────
   fetchTransactions: async (userId: string) => {
     set({ loading: true });
     try {
-      const { data, error } = await supabase
-        .from('transactions')
-        .select('*')
-        .eq('user_id', userId)
-        .order('transaction_date', { ascending: false })
-        .limit(100);
-
-      if (error) throw error;
-      set({ transactions: (data as DBTransaction[]) || [] });
+      const data = await getTransactions(userId);
+      set({ transactions: data });
+      console.log('[Store] Fetched', data.length, 'transactions');
     } catch (error) {
-      console.error('Fetch transactions error:', error);
+      console.error('[Store] Fetch transactions error:', error);
     } finally {
       set({ loading: false });
     }
@@ -56,101 +60,78 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
 
   addTransaction: async (tx) => {
     try {
-      const { data, error } = await supabase
-        .from('transactions')
-        .insert(tx)
-        .select()
-        .single();
+      const newTx = await insertTransaction(tx);
 
-      if (error) throw error;
+      // Update state immediately (optimistic)
+      const currentTx = get().transactions;
+      set({ transactions: [newTx, ...currentTx] });
 
-      const newTx = data as DBTransaction;
-      set((state) => ({
-        transactions: [newTx, ...state.transactions],
-      }));
+      console.log('[Store] Transaction added:', newTx.merchant_name, 'Rp' + newTx.amount);
       return newTx;
     } catch (error) {
-      console.error('Add transaction error:', error);
+      console.error('[Store] Add transaction error:', error);
       return null;
     }
   },
 
   deleteTransaction: async (id: string) => {
     try {
-      const { error } = await supabase
-        .from('transactions')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
-      set((state) => ({
-        transactions: state.transactions.filter((t) => t.id !== id),
-      }));
+      await dbDeleteTransaction(id);
+      const updatedTx = get().transactions.filter((t) => t.id !== id);
+      set({ transactions: updatedTx });
     } catch (error) {
-      console.error('Delete transaction error:', error);
+      console.error('[Store] Delete transaction error:', error);
     }
   },
 
-  // --- Goals ---
+  // ─── Goals ─────────────────────────────────────────────────
   fetchGoals: async (userId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('goals')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      set({ goals: (data as DBGoal[]) || [] });
+      const data = await getGoals(userId);
+      set({ goals: data });
+      console.log('[Store] Fetched', data.length, 'goals');
     } catch (error) {
-      console.error('Fetch goals error:', error);
+      console.error('[Store] Fetch goals error:', error);
     }
   },
 
   addGoal: async (goal) => {
     try {
-      const { data, error } = await supabase
-        .from('goals')
-        .insert({ ...goal, is_completed: false })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      const newGoal = data as DBGoal;
-      set((state) => ({ goals: [newGoal, ...state.goals] }));
+      const newGoal = await insertGoal(goal);
+      const currentGoals = get().goals;
+      set({ goals: [newGoal, ...currentGoals] });
+      console.log('[Store] Goal added:', newGoal.title);
       return newGoal;
     } catch (error) {
-      console.error('Add goal error:', error);
+      console.error('[Store] Add goal error:', error);
       return null;
     }
   },
 
   updateGoal: async (id: string, updates: Partial<DBGoal>) => {
     try {
-      const { data, error } = await supabase
-        .from('goals')
-        .update(updates)
-        .eq('id', id)
-        .select()
-        .single();
+      await dbUpdateGoal(id, updates);
 
-      if (error) throw error;
-      set((state) => ({
-        goals: state.goals.map((g) => (g.id === id ? (data as DBGoal) : g)),
-      }));
+      // Update state immediately (optimistic)
+      const updatedGoals = get().goals.map((g) => {
+        if (g.id === id) {
+          return { ...g, ...updates, updated_at: new Date().toISOString() };
+        }
+        return g;
+      });
+      set({ goals: updatedGoals });
     } catch (error) {
-      console.error('Update goal error:', error);
+      console.error('[Store] Update goal error:', error);
     }
   },
 
   deleteGoal: async (id: string) => {
     try {
-      const { error } = await supabase.from('goals').delete().eq('id', id);
-      if (error) throw error;
-      set((state) => ({ goals: state.goals.filter((g) => g.id !== id) }));
+      await dbDeleteGoal(id);
+      const updatedGoals = get().goals.filter((g) => g.id !== id);
+      set({ goals: updatedGoals });
     } catch (error) {
-      console.error('Delete goal error:', error);
+      console.error('[Store] Delete goal error:', error);
     }
   },
 
@@ -167,80 +148,9 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     });
   },
 
-  // --- Realtime ---
-  subscribeRealtime: (userId: string) => {
-    const channel = supabase
-      .channel('user-data')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'transactions',
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          const { eventType, new: newRow, old: oldRow } = payload;
-
-          set((state) => {
-            if (eventType === 'INSERT') {
-              // Avoid duplicates
-              if (state.transactions.find((t) => t.id === (newRow as DBTransaction).id)) {
-                return state;
-              }
-              return { transactions: [newRow as DBTransaction, ...state.transactions] };
-            }
-            if (eventType === 'DELETE') {
-              return {
-                transactions: state.transactions.filter((t) => t.id !== (oldRow as any).id),
-              };
-            }
-            if (eventType === 'UPDATE') {
-              return {
-                transactions: state.transactions.map((t) =>
-                  t.id === (newRow as DBTransaction).id ? (newRow as DBTransaction) : t
-                ),
-              };
-            }
-            return state;
-          });
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'goals',
-          filter: `user_id=eq.${userId}`,
-        },
-        (payload) => {
-          const { eventType, new: newRow, old: oldRow } = payload;
-
-          set((state) => {
-            if (eventType === 'INSERT') {
-              if (state.goals.find((g) => g.id === (newRow as DBGoal).id)) return state;
-              return { goals: [newRow as DBGoal, ...state.goals] };
-            }
-            if (eventType === 'DELETE') {
-              return { goals: state.goals.filter((g) => g.id !== (oldRow as any).id) };
-            }
-            if (eventType === 'UPDATE') {
-              return {
-                goals: state.goals.map((g) =>
-                  g.id === (newRow as DBGoal).id ? (newRow as DBGoal) : g
-                ),
-              };
-            }
-            return state;
-          });
-        }
-      )
-      .subscribe();
-
-    // Return unsubscribe function
-    return () => {
-      supabase.removeChannel(channel);
-    };
+  // ─── Realtime ──────────────────────────────────────────────
+  subscribeRealtime: (_userId: string) => {
+    // Local database — no realtime subscription needed
+    return () => {};
   },
 }));

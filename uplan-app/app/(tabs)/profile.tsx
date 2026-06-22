@@ -15,7 +15,7 @@ import { useTheme } from '../../hooks/useTheme';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useThemeStore, type ThemePreference } from '../../store/useThemeStore';
 import { UPlanColors } from '../../constants/colors';
-import type { DBUser } from '../../lib/supabase';
+import { showAlert, showConfirm, type DBUser } from '../../lib/database';
 
 export default function ProfileScreen() {
   const { theme, isDark } = useTheme();
@@ -30,10 +30,7 @@ export default function ProfileScreen() {
   }>({ visible: false, field: null, label: '', value: '' });
 
   const handleSignOut = () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign Out', style: 'destructive', onPress: () => signOut() },
-    ]);
+    showConfirm('Sign Out', 'Are you sure you want to sign out?', () => signOut());
   };
 
   const openEdit = (field: keyof DBUser, label: string, currentVal: any) => {
@@ -88,29 +85,29 @@ export default function ProfileScreen() {
           <SettingItem
             icon="wallet" color={UPlanColors.success}
             label="Monthly Income"
-            value={`Rp${(profile?.monthly_income || 0).toLocaleString('id-ID')}`}
+            value={`Rp${(profile?.monthly_income ?? 0).toLocaleString('id-ID')}`}
             onPress={() => openEdit('monthly_income', 'Monthly Income', profile?.monthly_income)}
             theme={theme}
           />
           <SettingItem
             icon="bullseye" color={UPlanColors.primary}
             label="Daily Budget Limit"
-            value={`Rp${(profile?.daily_budget || 0).toLocaleString('id-ID')}`}
-            onPress={() => openEdit('daily_budget', 'Daily Budget', profile?.daily_budget)}
+            value={`Rp${(profile?.daily_budget ?? 160000).toLocaleString('id-ID')}`}
+            onPress={() => openEdit('daily_budget', 'Daily Budget', profile?.daily_budget ?? 160000)}
             theme={theme}
           />
           <SettingItem
             icon="mobile-screen" color={UPlanColors.warning}
             label="QRIS Daily Tap Limit"
-            value={`${profile?.qris_daily_limit || 0}x / day`}
-            onPress={() => openEdit('qris_daily_limit', 'QRIS Tap Limit', profile?.qris_daily_limit)}
+            value={`${profile?.qris_daily_limit ?? 6}x / day`}
+            onPress={() => openEdit('qris_daily_limit', 'QRIS Tap Limit', profile?.qris_daily_limit ?? 6)}
             theme={theme}
           />
           <SettingItem
             icon="bolt" color={UPlanColors.danger}
             label="Impulse Threshold"
-            value={`< Rp${(profile?.impulse_threshold || 0).toLocaleString('id-ID')}`}
-            onPress={() => openEdit('impulse_threshold', 'Impulse Threshold', profile?.impulse_threshold)}
+            value={`< Rp${(profile?.impulse_threshold ?? 50000).toLocaleString('id-ID')}`}
+            onPress={() => openEdit('impulse_threshold', 'Impulse Threshold', profile?.impulse_threshold ?? 50000)}
             theme={theme}
             isLast
           />
@@ -179,8 +176,8 @@ export default function ProfileScreen() {
                 />
               </View>
               
-              <TouchableOpacity style={styles.saveBtn} onPress={saveEdit}>
-                <LinearGradient colors={[UPlanColors.primary, UPlanColors.primaryLight]} style={styles.saveBtnGradient}
+              <TouchableOpacity style={styles.saveBtn} onPress={saveEdit} activeOpacity={0.7}>
+                <LinearGradient pointerEvents="none" colors={[UPlanColors.primary, UPlanColors.primaryLight]} style={styles.saveBtnGradient}
                   start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
                   <Text style={styles.saveBtnText}>Save Changes</Text>
                 </LinearGradient>

@@ -6,21 +6,37 @@
 import { useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  RefreshControl, FlatList, Dimensions,
+  FlatList, Dimensions, Modal, TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { Ionicons, FontAwesome6 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Haptics from 'expo-haptics';
 import { useTheme } from '../../hooks/useTheme';
 import { useBudget } from '../../hooks/useBudget';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
+import { useUIStore } from '../../store/useUIStore';
 import { UPlanColors } from '../../constants/colors';
 import { CATEGORIES } from '../../constants/categories';
 import { useState } from 'react';
 import { router } from 'expo-router';
+import OCRScanner from '../../components/OCRScanner';
+import { showAlert } from '../../lib/database';
 
 const { width } = Dimensions.get('window');
+
+// Safe haptics helper — silently fails on web/unsupported platforms
+async function safeHaptics(type: 'success' | 'light' | 'medium' = 'success') {
+  try {
+    const Haptics = require('expo-haptics');
+    if (type === 'success') {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else if (type === 'light') {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    } else {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+  } catch {}
+}
 
 export default function DashboardScreen() {
   const { theme, isDark } = useTheme();
@@ -29,6 +45,109 @@ export default function DashboardScreen() {
   const user = useAuthStore((s) => s.user);
   const budget = useBudget();
   const [refreshing, setRefreshing] = useState(false);
+
+  // Scanner & Manual Modal states from global UI store
+  const { showScanner, setShowScanner, showManualAdd: showManualModal, setShowManualAdd: setShowManualModal } = useUIStore();
+  
+  // Local states for forms
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [scanMerchant, setScanMerchant] = useState('');
+  const [scanAmount, setScanAmount] = useState('');
+  
+  const [manualMerchant, setManualMerchant] = useState('');
+  const [manualAmount, setManualAmount] = useState('');
+  const [manualCategory, setManualCategory] = useState('food'); // Default
+
+  // Edit Limit Modal
+  const [showEditLimit, setShowEditLimit] = useState(false);
+  const [limitInput, setLimitInput] = useState('');
+
+  const handleScanComplete = (data: any) => {
+    setScanMerchant(data.merchant || '');
+    setScanAmount(data.amount ? data.amount.toString() : '');
+    setShowConfirmModal(true);
+  };
+
+  const handleSaveScan = async () => {
+    if (!user?.id) {
+      showAlert('Error', 'User belum login!');
+      return;
+    }
+    const amt = parseInt(scanAmount);
+    if (isNaN(amt) || amt <= 0) {
+      showAlert('Oops', 'Nominal tidak valid!');
+      return;
+    }
+    
+    const result = await useTransactionStore.getState().addTransaction({
+      user_id: user.id,
+      amount: amt,
+      merchant_name: scanMerchant.trim() || 'Unknown',
+      category: 'other',
+      payment_method: 'qris',
+      note: 'Via OCR Scan',
+      receipt_url: null,
+      is_impulse: false,
+      transaction_date: new Date().toISOString(),
+    });
+    
+    if (!result) {
+      showAlert('Gagal', 'Gagal menyimpan transaksi.');
+      return;
+    }
+    
+    setShowConfirmModal(false);
+    safeHaptics('success');
+    showAlert('Sukses', 'Transaksi QRIS berhasil disimpan!');
+  };
+
+  const handleSaveManual = async () => {
+    if (!user?.id) {
+      showAlert('Error', 'User belum login!');
+      return;
+    }
+    const amt = parseInt(manualAmount);
+    if (isNaN(amt) || amt <= 0) {
+      showAlert('Oops', 'Nominal tidak valid! Masukkan angka.');
+      return;
+    }
+
+    const result = await useTransactionStore.getState().addTransaction({
+      user_id: user.id,
+      amount: amt,
+      merchant_name: manualMerchant.trim() || 'Manual Entry',
+      category: manualCategory,
+      payment_method: 'cash',
+      note: 'Manual Record',
+      receipt_url: null,
+      is_impulse: false,
+      transaction_date: new Date().toISOString(),
+    });
+
+    if (!result) {
+      showAlert('Gagal', 'Gagal menyimpan transaksi manual.');
+      return;
+    }
+
+    setShowManualModal(false);
+    setManualMerchant('');
+    setManualAmount('');
+    safeHaptics('success');
+    showAlert('Sukses!', 'Transaksi manual berhasil dicatat!');
+  };
+
+  const handleSaveLimit = async () => {
+    const amt = parseInt(limitInput);
+    if (isNaN(amt) || amt < 0) {
+      showAlert('Oops', 'Nominal tidak valid!');
+      return;
+    }
+    
+    await useAuthStore.getState().updateProfile({ daily_budget: amt });
+    setShowEditLimit(false);
+    safeHaptics('success');
+    showAlert('Sukses!', `Limit harian diubah menjadi Rp${amt.toLocaleString('id-ID')}`);
+  };
 
   const onRefresh = useCallback(async () => {
     if (!user?.id) return;
@@ -46,11 +165,6 @@ export default function DashboardScreen() {
       style={[styles.container, { backgroundColor: theme.background }]}
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh}
-          tintColor={UPlanColors.primary} colors={[UPlanColors.primary]}
-        />
-      }
     >
       {/* Header */}
       <View style={styles.header}>
@@ -58,16 +172,27 @@ export default function DashboardScreen() {
           <Text style={[styles.greeting, { color: theme.textMuted }]}>{greeting}</Text>
           <Text style={[styles.userName, { color: theme.text }]}>{userName}</Text>
         </View>
-        <TouchableOpacity
-          style={[styles.avatar, { backgroundColor: UPlanColors.primary }]}
-          onPress={() => router.push('/(tabs)/profile')}
-        >
-          <Text style={styles.avatarText}>{userName.charAt(0).toUpperCase()}</Text>
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <TouchableOpacity style={[styles.hdrBtn, { backgroundColor: theme.card, borderColor: theme.border }]}
+            onPress={() => setShowManualModal(true)}
+          >
+            <FontAwesome6 name="plus" size={16} color={theme.textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.avatar, { backgroundColor: UPlanColors.primary }]}
+            onPress={() => router.push('/(tabs)/profile')}
+          >
+            <Text style={styles.avatarText}>{userName.charAt(0).toUpperCase()}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Daily Limit Card */}
-      <View style={[styles.limitCard, { borderColor: 'rgba(255,0,213,0.12)' }]}>
+      <View style={[styles.limitCard, { 
+        borderColor: 'rgba(255,0,213,0.2)',
+        shadowColor: UPlanColors.primary, shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: isDark ? 0.15 : 0.05, shadowRadius: 20, elevation: 10
+      }]}>
         <LinearGradient
           colors={isDark ? ['#1a1020', '#12101a'] : ['#FFF5FC', '#F8F0FF']}
           style={StyleSheet.absoluteFill}
@@ -75,7 +200,13 @@ export default function DashboardScreen() {
         />
         <View style={styles.limitTop}>
           <Text style={[styles.limitLabel, { color: theme.textMuted }]}>TODAY'S LIMIT</Text>
-          <TouchableOpacity style={[styles.editBadge, { backgroundColor: UPlanColors.primarySubtle }]}>
+          <TouchableOpacity 
+            style={[styles.editBadge, { backgroundColor: UPlanColors.primarySubtle }]}
+            onPress={() => {
+              setLimitInput(budget.dailyLimit.toString());
+              setShowEditLimit(true);
+            }}
+          >
             <FontAwesome6 name="pen" size={10} color={UPlanColors.primaryLight} />
             <Text style={[styles.editBadgeText, { color: UPlanColors.primaryLight }]}>Edit</Text>
           </TouchableOpacity>
@@ -139,7 +270,13 @@ export default function DashboardScreen() {
           { icon: 'chart-simple', label: 'Stats', color: UPlanColors.warning, bg: UPlanColors.warningSubtle },
         ].map((a, i) => (
           <TouchableOpacity key={i} style={[styles.qaBtn, { backgroundColor: theme.card, borderColor: theme.border }]}
-            onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+            onPress={() => {
+              safeHaptics('light');
+              if (a.icon === 'camera') setShowScanner(true);
+              else if (a.icon === 'plus') setShowManualModal(true);
+              else if (a.icon === 'chart-simple') router.push('/(tabs)/qris');
+              else if (a.icon === 'piggy-bank') router.push('/(tabs)/goals');
+            }}
             activeOpacity={0.7}
           >
             <View style={[styles.qaIcon, { backgroundColor: a.bg }]}>
@@ -212,6 +349,130 @@ export default function DashboardScreen() {
       </View>
 
       <View style={{ height: 40 }} />
+
+      {/* OCR Scanner */}
+      <OCRScanner
+        visible={showScanner}
+        onClose={() => setShowScanner(false)}
+        onScanComplete={handleScanComplete}
+      />
+
+      {/* Confirm Scan Modal */}
+      <Modal visible={showConfirmModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalContentWrap}>
+            <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
+              <View style={styles.modalHeader}>
+                <Text style={[styles.modalTitle, { color: theme.text }]}>Konfirmasi Transaksi</Text>
+                <TouchableOpacity onPress={() => setShowConfirmModal(false)}>
+                  <FontAwesome6 name="xmark" size={20} color={theme.textMuted} />
+                </TouchableOpacity>
+              </View>
+              
+              <ScrollView contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
+                <View style={styles.formGroup}>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>Nama Merchant / Penerima</Text>
+                  <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
+                    value={scanMerchant} onChangeText={setScanMerchant} placeholder="Kopi Kenangan" placeholderTextColor={theme.textMuted} />
+                </View>
+                
+                <View style={styles.formGroup}>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>Nominal (Rp)</Text>
+                  <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
+                    value={scanAmount} onChangeText={setScanAmount} placeholder="50000" placeholderTextColor={theme.textMuted} keyboardType="numeric" />
+                </View>
+                
+                <TouchableOpacity style={styles.saveBtn} onPress={handleSaveScan} activeOpacity={0.7}>
+                  <LinearGradient pointerEvents="none" colors={[UPlanColors.primary, UPlanColors.primaryLight]} style={styles.saveBtnGradient}
+                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+                    <Text style={styles.saveBtnText}>Simpan Transaksi</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      {/* Manual Add Modal */}
+      <Modal visible={showManualModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalContentWrap}>
+            <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
+              <View style={styles.modalHeader}>
+                <Text style={[styles.modalTitle, { color: theme.text }]}>Catat Manual</Text>
+                <TouchableOpacity onPress={() => setShowManualModal(false)}>
+                  <FontAwesome6 name="xmark" size={20} color={theme.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
+                <View style={styles.formGroup}>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>Keterangan (Merchant)</Text>
+                  <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
+                    value={manualMerchant} onChangeText={setManualMerchant} placeholder="Makan Siang" placeholderTextColor={theme.textMuted} />
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>Nominal (Rp)</Text>
+                  <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
+                    value={manualAmount} onChangeText={setManualAmount} placeholder="25000" placeholderTextColor={theme.textMuted} keyboardType="numeric" />
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>Kategori</Text>
+                  <View style={styles.categoryRow}>
+                    {Object.entries(CATEGORIES).slice(0, 4).map(([key, cat]) => (
+                      <TouchableOpacity key={key} style={[styles.catBadge, manualCategory === key && { backgroundColor: cat.bgColor, borderColor: cat.color }]}
+                        onPress={() => setManualCategory(key)}>
+                        <FontAwesome6 name={cat.icon} size={12} color={manualCategory === key ? cat.color : theme.textMuted} />
+                        <Text style={[styles.catText, { color: manualCategory === key ? cat.color : theme.textMuted }]}>{cat.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                <TouchableOpacity style={styles.saveBtn} onPress={handleSaveManual} activeOpacity={0.7}>
+                  <LinearGradient pointerEvents="none" colors={[UPlanColors.primary, UPlanColors.primaryLight]} style={styles.saveBtnGradient}
+                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+                    <Text style={styles.saveBtnText}>Catat Pengeluaran</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      {/* Edit Limit Modal */}
+      <Modal visible={showEditLimit} animationType="fade" transparent>
+        <View style={styles.modalOverlayCenter}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%', alignItems: 'center' }}>
+            <View style={[styles.modalCenterContent, { backgroundColor: theme.card }]}>
+              <View style={styles.modalHeader}>
+                <Text style={[styles.modalTitle, { color: theme.text }]}>Ubah Limit Harian</Text>
+                <TouchableOpacity onPress={() => setShowEditLimit(false)}>
+                  <FontAwesome6 name="xmark" size={20} color={theme.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={[styles.label, { color: theme.textSecondary }]}>Nominal Target (Rp)</Text>
+                <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
+                  value={limitInput} onChangeText={setLimitInput} placeholder="160000" placeholderTextColor={theme.textMuted} keyboardType="numeric" />
+              </View>
+
+              <TouchableOpacity style={styles.saveBtn} onPress={handleSaveLimit} activeOpacity={0.7}>
+                <LinearGradient pointerEvents="none" colors={[UPlanColors.primary, UPlanColors.primaryLight]} style={styles.saveBtnGradient}
+                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+                  <Text style={styles.saveBtnText}>Simpan Limit Baru</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
     </ScrollView>
   );
 }
@@ -265,11 +526,33 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingHorizontal: 16, paddingTop: 56 },
 
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
+  modalOverlayCenter: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
+  modalContentWrap: { width: '100%' },
+  modalContent: { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: Platform.OS === 'ios' ? 40 : 24 },
+  modalCenterContent: { width: '100%', borderRadius: 24, padding: 24 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalTitle: { fontSize: 18, fontWeight: '800' },
+  
+  formGroup: { marginBottom: 16 },
+  label: { fontSize: 13, fontWeight: '600', marginBottom: 6 },
+  input: { padding: 14, borderRadius: 12, borderWidth: 1, fontSize: 15 },
+  
+  saveBtn: { borderRadius: 14, overflow: 'hidden', marginTop: 8 },
+  saveBtnGradient: { paddingVertical: 16, alignItems: 'center' },
+  saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+
+  categoryRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  catBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: 'transparent' },
+  catText: { fontSize: 12, fontWeight: '600' },
+
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  hdrBtn: { width: 40, height: 40, borderRadius: 10, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
   greeting: { fontSize: 12, fontWeight: '500' },
-  userName: { fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
-  avatar: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
-  avatarText: { color: '#fff', fontSize: 18, fontWeight: '800' },
+  userName: { fontSize: 24, fontWeight: '800', letterSpacing: -0.5 },
+  avatar: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center' },
+  avatarText: { color: '#fff', fontSize: 16, fontWeight: '800' },
 
   limitCard: {
     borderRadius: 22, padding: 20, marginBottom: 14,
@@ -282,7 +565,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4, paddingHorizontal: 12, borderRadius: 20,
   },
   editBadgeText: { fontSize: 11, fontWeight: '600' },
-  limitAmount: { fontSize: 36, fontWeight: '900', letterSpacing: -2, lineHeight: 42 },
+  limitAmount: { fontSize: 40, fontWeight: '900', letterSpacing: -2, lineHeight: 46 },
   limitAmountLabel: { fontSize: 16, fontWeight: '600' },
 
   progressBar: { height: 10, borderRadius: 5, overflow: 'hidden', marginTop: 14 },

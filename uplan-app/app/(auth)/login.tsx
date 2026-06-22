@@ -20,24 +20,47 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTheme } from '../../hooks/useTheme';
 import { UPlanColors } from '../../constants/colors';
+import { showAlert } from '../../lib/database';
 
 const { width } = Dimensions.get('window');
 
 export default function LoginScreen() {
   const { theme, isDark } = useTheme();
-  const { signInWithGoogle, signInWithMagicLink, loading } = useAuthStore();
+  const { signInWithGoogle, signInWithMagicLink, signInWithPassword, signUpWithPassword, loading } = useAuthStore();
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
+
+  async function handlePasswordAuth() {
+    if (!email.trim() || !email.includes('@')) {
+      showAlert('Oops', 'Masukkan email yang valid!');
+      return;
+    }
+    if (password.length < 6) {
+      showAlert('Oops', 'Password minimal 6 karakter!');
+      return;
+    }
+
+    if (isSignUp) {
+      const { error } = await signUpWithPassword(email.trim(), password);
+      if (error) showAlert('Error', error);
+      else showAlert('Sukses!', 'Akun berhasil dibuat!');
+    } else {
+      const { error } = await signInWithPassword(email.trim(), password);
+      if (error) showAlert('Error', error);
+    }
+  }
 
   async function handleMagicLink() {
     if (!email.trim() || !email.includes('@')) {
-      Alert.alert('Oops', 'Masukkan email yang valid!');
+      showAlert('Oops', 'Masukkan email yang valid!');
       return;
     }
 
     const { error } = await signInWithMagicLink(email.trim());
     if (error) {
-      Alert.alert('Error', error);
+      showAlert('Error', error);
     } else {
       setMagicLinkSent(true);
     }
@@ -49,7 +72,7 @@ export default function LoginScreen() {
       style={[styles.container, { backgroundColor: theme.background }]}
     >
       {/* Background gradient glow */}
-      <View style={styles.glowContainer}>
+      <View style={styles.glowContainer} pointerEvents="none">
         <LinearGradient
           colors={['rgba(255,0,213,0.15)', 'transparent']}
           style={styles.glow}
@@ -112,7 +135,7 @@ export default function LoginScreen() {
               <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
             </View>
 
-            {/* Magic Link */}
+            {/* Email & Password */}
             <TextInput
               style={[styles.input, {
                 backgroundColor: theme.input,
@@ -129,27 +152,65 @@ export default function LoginScreen() {
               editable={!loading}
             />
 
+            <TextInput
+              style={[styles.input, {
+                backgroundColor: theme.input,
+                borderColor: theme.inputBorder,
+                color: theme.text,
+              }]}
+              placeholder="Password"
+              placeholderTextColor={theme.textMuted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={password}
+              onChangeText={setPassword}
+              editable={!loading}
+            />
+
             <TouchableOpacity
               style={[styles.magicLinkBtn, loading && styles.btnDisabled]}
-              onPress={handleMagicLink}
+              onPress={handlePasswordAuth}
               disabled={loading}
               activeOpacity={0.8}
             >
               <LinearGradient
+                pointerEvents="none"
                 colors={[UPlanColors.primary, UPlanColors.primaryLight]}
                 style={styles.magicLinkGradient}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
               >
                 <Text style={styles.magicLinkBtnText}>
-                  {loading ? 'Sending...' : '✨ Send Magic Link'}
+                  {loading ? 'Loading...' : isSignUp ? '📝 Create Account' : '🚀 Sign In'}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
 
-            <Text style={[styles.hint, { color: theme.textMuted }]}>
-              No password needed — we'll send a login link to your email
-            </Text>
+            <TouchableOpacity
+              onPress={() => setIsSignUp(!isSignUp)}
+              style={styles.toggleAuthBtn}
+              disabled={loading}
+            >
+              <Text style={[styles.toggleAuthText, { color: theme.textSecondary }]}>
+                {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Sign Up'}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Divider */}
+            <View style={styles.divider}>
+              <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
+              <Text style={[styles.dividerText, { color: theme.textMuted }]}>or</Text>
+              <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
+            </View>
+
+            <TouchableOpacity
+              style={[styles.secondaryBtn, { borderColor: theme.border, marginTop: 0 }]}
+              onPress={handleMagicLink}
+              disabled={loading}
+            >
+              <Text style={[styles.secondaryBtnText, { color: theme.text }]}>✨ Send Magic Link</Text>
+            </TouchableOpacity>
           </View>
         )}
       </View>
@@ -210,8 +271,11 @@ const styles = StyleSheet.create({
   successEmoji: { fontSize: 48 },
   successTitle: { fontSize: 22, fontWeight: '800' },
   successDesc: { fontSize: 14, textAlign: 'center', lineHeight: 22 },
-  secondaryBtn: { paddingVertical: 14, paddingHorizontal: 24, borderRadius: 12, borderWidth: 1, marginTop: 12 },
+  secondaryBtn: { paddingVertical: 14, paddingHorizontal: 24, borderRadius: 12, borderWidth: 1, marginTop: 12, alignItems: 'center' },
   secondaryBtnText: { fontSize: 14, fontWeight: '600' },
+
+  toggleAuthBtn: { alignSelf: 'center', marginVertical: 8 },
+  toggleAuthText: { fontSize: 13, fontWeight: '600' },
 
   footer: { fontSize: 11, textAlign: 'center', paddingBottom: 40, paddingHorizontal: 32 },
 });

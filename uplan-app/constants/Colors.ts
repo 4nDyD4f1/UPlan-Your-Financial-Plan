@@ -89,4 +89,4 @@ export const darkTheme = {
   statusBar: 'light' as const,
 };
 
-export type ThemeColors = typeof lightTheme;
+export type ThemeColors = Omit<typeof lightTheme, 'statusBar'> & { statusBar: 'light' | 'dark' };

@@ -5,14 +5,33 @@
 
 import { createClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import 'react-native-url-polyfill/dist/polyfill';
+import { Platform } from 'react-native';
+import 'react-native-url-polyfill/auto';
+
+const isWeb = Platform.OS === 'web';
+const isServer = isWeb && typeof window === 'undefined';
+
+const customStorage = {
+  getItem: (key: string) => {
+    if (isServer) return null;
+    return AsyncStorage.getItem(key);
+  },
+  setItem: (key: string, value: string) => {
+    if (isServer) return;
+    return AsyncStorage.setItem(key, value);
+  },
+  removeItem: (key: string) => {
+    if (isServer) return;
+    return AsyncStorage.removeItem(key);
+  },
+};
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://YOUR_PROJECT.supabase.co';
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'YOUR_ANON_KEY';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
-    storage: AsyncStorage,
+    storage: customStorage,
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false, // Disable for React Native

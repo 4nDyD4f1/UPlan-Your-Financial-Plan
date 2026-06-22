@@ -1,11 +1,12 @@
 /**
  * UPlan — useOCR Hook
- * Pick image → upload to Supabase Storage → OCR via Edge Function → categorize
+ * Pick image → OCR via free API → extract amount & merchant → auto-categorize
+ * Uses OCR.space free API — no server/Docker needed!
  */
 
 import { useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
-import { supabase } from '../lib/supabase';
+import { showAlert } from '../lib/database';
 
 export interface OCRResult {
   amount: number | null;
@@ -16,10 +17,82 @@ export interface OCRResult {
   rawText: string;
 }
 
+// OCR.space free API — get your own key at https://ocr.space/ocrapi/freekey
+// The free tier gives 25,000 requests/month
+const OCR_API_KEY = 'K85403024288957';
+const OCR_API_URL = 'https://api.ocr.space/parse/image';
+
 export function useOCR() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<OCRResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  async function processImage(base64: string): Promise<OCRResult | null> {
+    setLoading(true);
+    setError(null);
+
+    try {
+      // Call OCR.space free API
+      const formData = new FormData();
+      formData.append('base64Image', `data:image/jpeg;base64,${base64}`);
+      formData.append('isOverlayRequired', 'false');
+      formData.append('detectOrientation', 'true');
+      formData.append('scale', 'true');
+      formData.append('OCREngine', '2'); // Engine 2 auto-detects language
+
+      const response = await fetch(OCR_API_URL, {
+        method: 'POST',
+        headers: {
+          'apikey': OCR_API_KEY,
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`OCR API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.IsErroredOnProcessing) {
+        throw new Error(data.ErrorMessage?.[0] || 'OCR processing failed');
+      }
+
+      const rawText = data.ParsedResults?.[0]?.ParsedText || '';
+      
+      if (!rawText.trim()) {
+        throw new Error('Tidak bisa membaca teks dari gambar. Coba foto yang lebih jelas.');
+      }
+
+      console.log('[OCR] Raw text:', rawText);
+
+      // Extract amount and merchant from the raw text
+      const amount = extractAmount(rawText);
+      const merchant = extractMerchant(rawText);
+      const category = localCategorize(merchant);
+
+      const ocrResult: OCRResult = {
+        amount,
+        merchant,
+        date: new Date().toISOString(),
+        category,
+        receiptUrl: '',
+        rawText,
+      };
+
+      console.log('[OCR] Extracted:', { amount, merchant, category });
+
+      setResult(ocrResult);
+      return ocrResult;
+    } catch (err: any) {
+      const msg = err.message || 'Gagal scan struk';
+      console.error('[OCR] Error:', msg);
+      setError(msg);
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function pickAndScan(): Promise<OCRResult | null> {
     setError(null);
@@ -28,7 +101,7 @@ export function useOCR() {
     // Request permission
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      setError('Permission to access gallery was denied');
+      setError('Izin akses galeri ditolak');
       return null;
     }
 
@@ -43,64 +116,7 @@ export function useOCR() {
       return null;
     }
 
-    setLoading(true);
-    try {
-      const base64 = picked.assets[0].base64;
-
-      // 1. Upload to Supabase Storage
-      const fileName = `receipts/${Date.now()}.jpg`;
-      const { error: uploadError } = await supabase.storage
-        .from('receipts')
-        .upload(fileName, decode(base64), {
-          contentType: 'image/jpeg',
-        });
-
-      let receiptUrl = '';
-      if (!uploadError) {
-        const { data: urlData } = supabase.storage
-          .from('receipts')
-          .getPublicUrl(fileName);
-        receiptUrl = urlData?.publicUrl || '';
-      }
-
-      // 2. Call OCR Edge Function
-      const { data: ocrData, error: ocrError } = await supabase.functions.invoke('ocr', {
-        body: { imageBase64: base64 },
-      });
-
-      if (ocrError) throw new Error(ocrError.message || 'OCR failed');
-
-      // 3. Auto-categorize merchant
-      let category = 'other';
-      if (ocrData?.merchant) {
-        try {
-          const { data: catData } = await supabase.functions.invoke('categorize', {
-            body: { merchantName: ocrData.merchant },
-          });
-          category = catData?.category || 'other';
-        } catch {
-          // Fallback: local keyword matching
-          category = localCategorize(ocrData.merchant);
-        }
-      }
-
-      const ocrResult: OCRResult = {
-        amount: ocrData?.amount ?? null,
-        merchant: ocrData?.merchant ?? 'Unknown',
-        date: ocrData?.date ?? new Date().toISOString(),
-        category,
-        receiptUrl,
-        rawText: ocrData?.rawText ?? '',
-      };
-
-      setResult(ocrResult);
-      return ocrResult;
-    } catch (err: any) {
-      setError(err.message || 'Failed to scan receipt');
-      return null;
-    } finally {
-      setLoading(false);
-    }
+    return processImage(picked.assets[0].base64);
   }
 
   async function takePhotoAndScan(): Promise<OCRResult | null> {
@@ -109,7 +125,7 @@ export function useOCR() {
 
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      setError('Permission to access camera was denied');
+      setError('Izin akses kamera ditolak');
       return null;
     }
 
@@ -120,36 +136,7 @@ export function useOCR() {
 
     if (taken.canceled || !taken.assets?.[0]?.base64) return null;
 
-    // Reuse same logic
-    setLoading(true);
-    try {
-      const base64 = taken.assets[0].base64;
-
-      const { data: ocrData, error: ocrError } = await supabase.functions.invoke('ocr', {
-        body: { imageBase64: base64 },
-      });
-
-      if (ocrError) throw new Error('OCR failed');
-
-      const category = ocrData?.merchant ? localCategorize(ocrData.merchant) : 'other';
-
-      const ocrResult: OCRResult = {
-        amount: ocrData?.amount ?? null,
-        merchant: ocrData?.merchant ?? 'Unknown',
-        date: ocrData?.date ?? new Date().toISOString(),
-        category,
-        receiptUrl: '',
-        rawText: ocrData?.rawText ?? '',
-      };
-
-      setResult(ocrResult);
-      return ocrResult;
-    } catch (err: any) {
-      setError(err.message);
-      return null;
-    } finally {
-      setLoading(false);
-    }
+    return processImage(taken.assets[0].base64);
   }
 
   function clearResult() {
@@ -160,18 +147,109 @@ export function useOCR() {
   return { pickAndScan, takePhotoAndScan, loading, result, error, clearResult };
 }
 
-// Fallback local categorization using keyword matching
+// ─── Amount Extraction ───────────────────────────────────────
+// Searches for Indonesian Rupiah patterns in OCR text
+function extractAmount(text: string): number | null {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  
+  // Priority patterns (most specific first)
+  const patterns = [
+    // "Total: Rp 50.000" or "TOTAL Rp50,000" or "Total 50000"
+    /(?:total|grand\s*total|jumlah|bayar|amount|nominal|pembayaran)\s*[:\s]*(?:Rp\.?\s*)?([0-9][0-9.,]*)/i,
+    // "Rp 50.000" or "Rp50,000" or "IDR 50.000"
+    /(?:Rp\.?|IDR)\s*([0-9][0-9.,]*)/i,
+    // Plain number that looks like money (>= 1000)
+    /\b([0-9]{1,3}(?:[.,][0-9]{3})+)\b/,
+  ];
+
+  // First try to find "total" lines
+  for (const line of lines) {
+    if (/total|jumlah|bayar|amount|nominal|pembayaran/i.test(line)) {
+      const match = line.match(/(?:Rp\.?|IDR)?\s*([0-9][0-9.,]*)/i);
+      if (match) {
+        const num = parseIndonesianNumber(match[1]);
+        if (num && num >= 500) return num; // At least Rp500
+      }
+    }
+  }
+
+  // Then try each pattern on the full text
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const num = parseIndonesianNumber(match[1]);
+      if (num && num >= 500) return num;
+    }
+  }
+
+  // Last resort: find the largest number in the text
+  const allNumbers: number[] = [];
+  const numRegex = /([0-9][0-9.,]*)/g;
+  let m;
+  while ((m = numRegex.exec(text)) !== null) {
+    const num = parseIndonesianNumber(m[1]);
+    if (num && num >= 500 && num <= 100000000) { // Rp500 to Rp100jt
+      allNumbers.push(num);
+    }
+  }
+
+  if (allNumbers.length > 0) {
+    // Return the largest number (likely the total)
+    return Math.max(...allNumbers);
+  }
+
+  return null;
+}
+
+function parseIndonesianNumber(str: string): number | null {
+  if (!str) return null;
+  // Remove dots (thousand separators in Indonesian) and replace comma with dot
+  let cleaned = str.replace(/\./g, '').replace(/,/g, '');
+  const num = parseInt(cleaned, 10);
+  return isNaN(num) ? null : num;
+}
+
+// ─── Merchant Extraction ─────────────────────────────────────
+function extractMerchant(text: string): string {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 2);
+  
+  // Common patterns for merchant name in receipts
+  const skipWords = /^(total|jumlah|bayar|tanggal|date|waktu|time|no\.|ref|resi|struk|receipt|kasir|cashier|change|kembalian|tunai|cash|debit|kredit|credit|qris|dana|gopay|ovo|shopeepay|linkaja|\d+$)/i;
+  
+  // Look for "Kepada:" or "Merchant:" or "Nama:" patterns
+  for (const line of lines) {
+    const merchantMatch = line.match(/(?:kepada|merchant|nama|to|tujuan|penerima)\s*[:\s]+(.+)/i);
+    if (merchantMatch) {
+      const name = merchantMatch[1].trim();
+      if (name.length > 1) return name;
+    }
+  }
+
+  // First non-skip line that looks like a name (usually the merchant name is at the top)
+  for (const line of lines) {
+    if (line.length > 2 && line.length < 50 && !skipWords.test(line) && !/^\d+$/.test(line)) {
+      // Check it's not just numbers and symbols
+      if (/[a-zA-Z]/.test(line)) {
+        return line;
+      }
+    }
+  }
+
+  return 'Unknown Merchant';
+}
+
+// ─── Local Category Matching ─────────────────────────────────
 function localCategorize(merchant: string): string {
   const m = merchant.toLowerCase();
 
   const keywords: Record<string, string[]> = {
-    coffee: ['kopi', 'coffee', 'starbucks', 'fore', 'kenangan', 'janji jiwa', 'chatime', 'boba', 'tea', 'latte'],
-    food: ['makan', 'nasi', 'warung', 'resto', 'pizza', 'burger', 'sate', 'bakso', 'mie', 'ayam', 'indomaret', 'alfamart', 'snack'],
-    transport: ['grab', 'gojek', 'uber', 'ride', 'taxi', 'angkot', 'bus', 'kereta', 'mrt', 'krl', 'parkir'],
-    shopping: ['shopee', 'tokopedia', 'lazada', 'toko', 'mall', 'miniso', 'uniqlo', 'zara', 'h&m'],
-    entertainment: ['bioskop', 'cinema', 'cgv', 'xxi', 'spotify', 'netflix', 'game', 'concert', 'konser'],
-    bills: ['pln', 'listrik', 'pdam', 'air', 'internet', 'indihome', 'telkomsel', 'xl', 'pulsa', 'token'],
-    health: ['apotek', 'pharmacy', 'gym', 'fitness', 'dokter', 'rumah sakit', 'vitamin', 'protein'],
+    coffee: ['kopi', 'coffee', 'starbucks', 'fore', 'kenangan', 'janji jiwa', 'chatime', 'boba', 'tea', 'latte', 'cafe', 'kafe'],
+    food: ['makan', 'nasi', 'warung', 'resto', 'restaurant', 'pizza', 'burger', 'sate', 'bakso', 'mie', 'ayam', 'indomaret', 'alfamart', 'snack', 'dapur', 'kitchen', 'canteen', 'kantin', 'padang'],
+    transport: ['grab', 'gojek', 'uber', 'ride', 'taxi', 'angkot', 'bus', 'kereta', 'mrt', 'krl', 'parkir', 'bensin', 'pertamina', 'shell', 'fuel'],
+    shopping: ['shopee', 'tokopedia', 'lazada', 'toko', 'mall', 'miniso', 'uniqlo', 'zara', 'h&m', 'market', 'mart'],
+    entertainment: ['bioskop', 'cinema', 'cgv', 'xxi', 'spotify', 'netflix', 'game', 'concert', 'konser', 'karaoke'],
+    bills: ['pln', 'listrik', 'pdam', 'air', 'internet', 'indihome', 'telkomsel', 'xl', 'pulsa', 'token', 'wifi'],
+    health: ['apotek', 'pharmacy', 'gym', 'fitness', 'dokter', 'rumah sakit', 'vitamin', 'protein', 'klinik'],
   };
 
   for (const [category, words] of Object.entries(keywords)) {
@@ -179,32 +257,4 @@ function localCategorize(merchant: string): string {
   }
 
   return 'other';
-}
-
-// Simple base64 decoder for React Native
-function decode(base64: string): Uint8Array {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  const lookup = new Uint8Array(256);
-  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
-
-  const len = base64.length;
-  let bufferLength = len * 0.75;
-  if (base64[len - 1] === '=') bufferLength--;
-  if (base64[len - 2] === '=') bufferLength--;
-
-  const bytes = new Uint8Array(bufferLength);
-  let p = 0;
-
-  for (let i = 0; i < len; i += 4) {
-    const e1 = lookup[base64.charCodeAt(i)];
-    const e2 = lookup[base64.charCodeAt(i + 1)];
-    const e3 = lookup[base64.charCodeAt(i + 2)];
-    const e4 = lookup[base64.charCodeAt(i + 3)];
-
-    bytes[p++] = (e1 << 2) | (e2 >> 4);
-    bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
-    bytes[p++] = ((e3 & 3) << 6) | e4;
-  }
-
-  return bytes;
 }

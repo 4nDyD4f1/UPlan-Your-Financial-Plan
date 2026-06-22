@@ -1,22 +1,30 @@
 /**
  * UPlan — Auth Store (Zustand)
- * Manages user session and profile via Supabase Auth
+ * Uses database.ts for stable user identity
  */
 
 import { create } from 'zustand';
-import { supabase, type DBUser } from '../lib/supabase';
-import type { Session, User } from '@supabase/supabase-js';
+import {
+  initDatabase,
+  getOrCreateUser,
+  getUserProfile,
+  updateUserProfile,
+  showAlert,
+  type DBUser,
+} from '../lib/database';
 
 interface AuthState {
-  session: Session | null;
-  user: User | null;
+  user: { id: string; email: string } | null;
   profile: DBUser | null;
+  session: { access_token: string; user: { id: string; email: string } } | null;
   loading: boolean;
   initialized: boolean;
 
   // Actions
   initialize: () => Promise<void>;
   signInWithGoogle: () => Promise<void>;
+  signInWithPassword: (email: string, password: string) => Promise<{ error: string | null }>;
+  signUpWithPassword: (email: string, password: string) => Promise<{ error: string | null }>;
   signInWithMagicLink: (email: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   fetchProfile: () => Promise<void>;
@@ -24,36 +32,21 @@ interface AuthState {
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
-  session: null,
   user: null,
   profile: null,
+  session: null,
   loading: false,
   initialized: false,
 
   initialize: async () => {
     try {
-      // Get current session
-      const { data: { session } } = await supabase.auth.getSession();
-      set({ session, user: session?.user ?? null, initialized: true });
-
-      if (session?.user) {
-        await get().fetchProfile();
-      }
-
-      // Listen for auth changes
-      supabase.auth.onAuthStateChange(async (event, newSession) => {
-        set({ session: newSession, user: newSession?.user ?? null });
-
-        if (event === 'SIGNED_IN' && newSession?.user) {
-          await get().fetchProfile();
-        }
-
-        if (event === 'SIGNED_OUT') {
-          set({ profile: null });
-        }
-      });
+      const dbUser = await initDatabase();
+      const user = { id: dbUser.id, email: dbUser.email };
+      const session = { access_token: 'local_session', user };
+      set({ user, session, profile: dbUser, initialized: true });
+      console.log('[Auth] Initialized with user:', dbUser.id);
     } catch (error) {
-      console.error('Auth init error:', error);
+      console.error('[Auth] Init error:', error);
       set({ initialized: true });
     }
   },
@@ -61,95 +54,106 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   signInWithGoogle: async () => {
     set({ loading: true });
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: 'uplan://auth/callback',
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          },
-        },
+      const dbUser = await getOrCreateUser('google_user@uplan.app');
+      const user = { id: dbUser.id, email: dbUser.email };
+      set({
+        user,
+        session: { access_token: 'local_session', user },
+        profile: dbUser,
+        loading: false,
       });
-      if (error) throw error;
-    } catch (error: any) {
-      console.error('Google sign in error:', error.message);
-    } finally {
+    } catch (e) {
+      console.error('[Auth] Google sign in error:', e);
       set({ loading: false });
+    }
+  },
+
+  signInWithPassword: async (email: string, _password: string) => {
+    set({ loading: true });
+    try {
+      const dbUser = await getOrCreateUser(email);
+      // Update email if different
+      const updated = await updateUserProfile({ email });
+      const user = { id: updated.id, email: updated.email };
+      set({
+        user,
+        session: { access_token: 'local_session', user },
+        profile: updated,
+        loading: false,
+      });
+      return { error: null };
+    } catch (e) {
+      console.error('[Auth] Password sign in error:', e);
+      set({ loading: false });
+      return { error: 'Gagal login.' };
+    }
+  },
+
+  signUpWithPassword: async (email: string, _password: string) => {
+    set({ loading: true });
+    try {
+      const dbUser = await getOrCreateUser(email);
+      const updated = await updateUserProfile({ email });
+      const user = { id: updated.id, email: updated.email };
+      set({
+        user,
+        session: { access_token: 'local_session', user },
+        profile: updated,
+        loading: false,
+      });
+      return { error: null };
+    } catch (e) {
+      console.error('[Auth] Sign up error:', e);
+      set({ loading: false });
+      return { error: 'Gagal membuat akun.' };
     }
   },
 
   signInWithMagicLink: async (email: string) => {
     set({ loading: true });
     try {
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          emailRedirectTo: 'uplan://auth/callback',
-        },
+      const dbUser = await getOrCreateUser(email);
+      const updated = await updateUserProfile({ email });
+      const user = { id: updated.id, email: updated.email };
+      set({
+        user,
+        session: { access_token: 'local_session', user },
+        profile: updated,
+        loading: false,
       });
-      return { error: error?.message ?? null };
-    } catch (error: any) {
-      return { error: error.message };
-    } finally {
+      return { error: null };
+    } catch (e) {
+      console.error('[Auth] Magic link error:', e);
       set({ loading: false });
+      return { error: 'Gagal mengirim magic link.' };
     }
   },
 
   signOut: async () => {
-    set({ loading: true });
-    try {
-      await supabase.auth.signOut();
-      set({ session: null, user: null, profile: null });
-    } catch (error) {
-      console.error('Sign out error:', error);
-    } finally {
-      set({ loading: false });
-    }
+    set({
+      user: null,
+      session: null,
+      profile: null,
+      loading: false,
+    });
   },
 
   fetchProfile: async () => {
-    const { user } = get();
-    if (!user) return;
-
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-
-      if (error) {
-        // Profile might not exist yet (new user → onboarding)
-        if (error.code === 'PGRST116') {
-          set({ profile: null });
-          return;
-        }
-        throw error;
-      }
-
-      set({ profile: data as DBUser });
-    } catch (error) {
-      console.error('Fetch profile error:', error);
+      const profile = await getUserProfile();
+      if (profile) set({ profile });
+    } catch (e) {
+      console.error('[Auth] Fetch profile error:', e);
     }
   },
 
   updateProfile: async (updates: Partial<DBUser>) => {
-    const { user } = get();
-    if (!user) return;
-
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .update(updates)
-        .eq('id', user.id)
-        .select()
-        .single();
-
-      if (error) throw error;
-      set({ profile: data as DBUser });
-    } catch (error) {
-      console.error('Update profile error:', error);
+      const updated = await updateUserProfile(updates);
+      set({ profile: updated });
+      console.log('[Auth] Profile updated:', Object.keys(updates).join(', '));
+    } catch (e) {
+      console.error('[Auth] Update profile error:', e);
     }
   },
 }));

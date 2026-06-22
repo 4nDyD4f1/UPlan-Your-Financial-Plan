@@ -6,17 +6,28 @@
 import { useCallback, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  RefreshControl, Alert, Modal, TextInput, Platform,
+  RefreshControl, Modal, TextInput, Platform, KeyboardAvoidingView
 } from 'react-native';
 import { FontAwesome6 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Haptics from 'expo-haptics';
 import { useTheme } from '../../hooks/useTheme';
 import { useBudget } from '../../hooks/useBudget';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { UPlanColors } from '../../constants/colors';
-import type { DBGoal } from '../../lib/supabase';
+import { showAlert, showConfirm, type DBGoal } from '../../lib/database';
+
+// Safe haptics helper
+async function safeHaptics(type: 'success' | 'medium' = 'success') {
+  try {
+    const Haptics = require('expo-haptics');
+    if (type === 'success') {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } else {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    }
+  } catch {}
+}
 
 export default function GoalsScreen() {
   const { theme, isDark } = useTheme();
@@ -45,11 +56,10 @@ export default function GoalsScreen() {
     setRefreshing(false);
   }, [user?.id]);
 
-  const handleDelete = (id: string, title: string) => {
-    Alert.alert('Delete Goal', `Are you sure you want to delete "${title}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => deleteGoal(id) },
-    ]);
+  const handleDelete = (id: string, goalTitle: string) => {
+    showConfirm('Delete Goal', `Yakin ingin menghapus "${goalTitle}"?`, () => {
+      deleteGoal(id);
+    });
   };
 
   const openAddModal = () => {
@@ -74,10 +84,20 @@ export default function GoalsScreen() {
   };
 
   const handleSaveGoal = async () => {
-    if (!user?.id || !title.trim() || !target) return;
+    if (!user?.id) {
+      showAlert('Error', 'User belum login!');
+      return;
+    }
+    if (!title.trim() || !target) {
+      showAlert('Oops', 'Nama dan target harus diisi!');
+      return;
+    }
     
     const targetAmt = parseInt(target);
-    if (isNaN(targetAmt) || targetAmt <= 0) return;
+    if (isNaN(targetAmt) || targetAmt <= 0) {
+      showAlert('Oops', 'Target nominal tidak valid!');
+      return;
+    }
 
     if (editingGoal) {
       await updateGoal(editingGoal.id, {
@@ -86,8 +106,9 @@ export default function GoalsScreen() {
         target_amount: targetAmt,
         emoji,
       });
+      showAlert('Sukses!', 'Goal berhasil diperbarui!');
     } else {
-      await addGoal({
+      const result = await addGoal({
         user_id: user.id,
         title: title.trim(),
         description: description.trim(),
@@ -97,23 +118,37 @@ export default function GoalsScreen() {
         color: 'pink',
         deadline: null,
       });
+
+      if (!result) {
+        showAlert('Gagal', 'Gagal menyimpan tujuan.');
+        return;
+      }
+      showAlert('Sukses!', 'Tujuan berhasil dibuat!');
     }
+    
     setShowGoalModal(false);
+    setTitle('');
+    setDescription('');
+    setTarget('');
+    safeHaptics('success');
   };
 
   const handleAddFunds = async () => {
     if (!fundingGoal || !fundAmount) return;
     const amt = parseInt(fundAmount);
-    if (isNaN(amt) || amt <= 0) return;
+    if (isNaN(amt) || amt <= 0) {
+      showAlert('Oops', 'Nominal tidak valid!');
+      return;
+    }
 
     await contributeToGoal(fundingGoal.id, amt);
     
     // Check if reached
     if (fundingGoal.current_amount + amt >= fundingGoal.target_amount) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('🎉 Goal Reached!', `Congratulations, you achieved your goal: ${fundingGoal.title}`);
+      safeHaptics('success');
+      showAlert('🎉 Goal Reached!', `Selamat, Anda telah mencapai goal: ${fundingGoal.title}`);
     } else {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      safeHaptics('medium');
     }
     
     setShowFundModal(false);
@@ -124,11 +159,6 @@ export default function GoalsScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh}
-            tintColor={UPlanColors.primary} colors={[UPlanColors.primary]}
-          />
-        }
       >
         <Text style={[styles.pageTitle, { color: theme.text }]}>Savings Goals</Text>
 
@@ -214,7 +244,7 @@ export default function GoalsScreen() {
       {/* Goal Form Modal */}
       <Modal visible={showGoalModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContentWrap}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalContentWrap}>
             <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
               <View style={styles.modalHeader}>
                 <Text style={[styles.modalTitle, { color: theme.text }]}>
@@ -225,36 +255,38 @@ export default function GoalsScreen() {
                 </TouchableOpacity>
               </View>
               
-              <View style={styles.formGroup}>
-                <Text style={[styles.label, { color: theme.textSecondary }]}>Emoji</Text>
-                <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
-                  value={emoji} onChangeText={setEmoji} maxLength={4} />
-              </View>
-              
-              <View style={styles.formGroup}>
-                <Text style={[styles.label, { color: theme.textSecondary }]}>Name</Text>
-                <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
-                  value={title} onChangeText={setTitle} placeholder="New MacBook" placeholderTextColor={theme.textMuted} />
-              </View>
-              
-              <View style={styles.formGroup}>
-                <Text style={[styles.label, { color: theme.textSecondary }]}>Description</Text>
-                <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
-                  value={description} onChangeText={setDescription} placeholder="MacBook Air M4" placeholderTextColor={theme.textMuted} />
-              </View>
-              
-              <View style={styles.formGroup}>
-                <Text style={[styles.label, { color: theme.textSecondary }]}>Target Amount (Rp)</Text>
-                <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
-                  value={target} onChangeText={setTarget} placeholder="15000000" placeholderTextColor={theme.textMuted} keyboardType="numeric" />
-              </View>
-              
-              <TouchableOpacity style={styles.saveBtn} onPress={handleSaveGoal}>
-                <LinearGradient colors={[UPlanColors.primary, UPlanColors.primaryLight]} style={styles.saveBtnGradient}
-                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-                  <Text style={styles.saveBtnText}>{editingGoal ? 'Save Changes' : 'Create Goal'}</Text>
-                </LinearGradient>
-              </TouchableOpacity>
+              <ScrollView contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
+                <View style={styles.formGroup}>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>Emoji</Text>
+                  <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
+                    value={emoji} onChangeText={setEmoji} maxLength={4} />
+                </View>
+                
+                <View style={styles.formGroup}>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>Name</Text>
+                  <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
+                    value={title} onChangeText={setTitle} placeholder="New MacBook" placeholderTextColor={theme.textMuted} />
+                </View>
+                
+                <View style={styles.formGroup}>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>Description</Text>
+                  <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
+                    value={description} onChangeText={setDescription} placeholder="MacBook Air M4" placeholderTextColor={theme.textMuted} />
+                </View>
+                
+                <View style={styles.formGroup}>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>Target Amount (Rp)</Text>
+                  <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
+                    value={target} onChangeText={setTarget} placeholder="15000000" placeholderTextColor={theme.textMuted} keyboardType="numeric" />
+                </View>
+                
+                <TouchableOpacity style={styles.saveBtn} onPress={handleSaveGoal} activeOpacity={0.7}>
+                  <LinearGradient pointerEvents="none" colors={[UPlanColors.primary, UPlanColors.primaryLight]} style={styles.saveBtnGradient}
+                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+                    <Text style={styles.saveBtnText}>{editingGoal ? 'Save Changes' : 'Create Goal'}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </ScrollView>
             </View>
           </KeyboardAvoidingView>
         </View>
@@ -263,7 +295,7 @@ export default function GoalsScreen() {
       {/* Add Funds Modal */}
       <Modal visible={showFundModal} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContentWrap}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalContentWrap}>
             <View style={[styles.modalContent, { backgroundColor: theme.card }]}>
               <View style={styles.modalHeader}>
                 <Text style={[styles.modalTitle, { color: theme.text }]}>
@@ -300,8 +332,8 @@ export default function GoalsScreen() {
                 ))}
               </View>
               
-              <TouchableOpacity style={[styles.saveBtn, { marginTop: 16 }]} onPress={handleAddFunds}>
-                <LinearGradient colors={[UPlanColors.primary, UPlanColors.primaryLight]} style={styles.saveBtnGradient}
+              <TouchableOpacity style={[styles.saveBtn, { marginTop: 16 }]} onPress={handleAddFunds} activeOpacity={0.7}>
+                <LinearGradient pointerEvents="none" colors={[UPlanColors.primary, UPlanColors.primaryLight]} style={styles.saveBtnGradient}
                   start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
                   <Text style={styles.saveBtnText}>Add Funds</Text>
                 </LinearGradient>
