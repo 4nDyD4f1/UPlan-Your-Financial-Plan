@@ -3,7 +3,7 @@
  * Daily limit card, QRIS streak, quick actions, goals preview, recent transactions
  */
 
-import { useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   FlatList, Dimensions, Modal, TextInput, KeyboardAvoidingView, Platform,
@@ -16,8 +16,7 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { useTransactionStore } from '../../store/useTransactionStore';
 import { useUIStore } from '../../store/useUIStore';
 import { UPlanColors } from '../../constants/colors';
-import { CATEGORIES } from '../../constants/categories';
-import { useState } from 'react';
+import { CATEGORIES, PAYMENT_METHODS, type PaymentMethod } from '../../constants/categories';
 import { router } from 'expo-router';
 import OCRScanner from '../../components/OCRScanner';
 import { showAlert } from '../../lib/database';
@@ -54,18 +53,40 @@ export default function DashboardScreen() {
   const [scanMerchant, setScanMerchant] = useState('');
   const [scanAmount, setScanAmount] = useState('');
   const [scanCategory, setScanCategory] = useState('other');
+  const [scanPaymentMethod, setScanPaymentMethod] = useState<PaymentMethod>('qris');
   
   const [manualMerchant, setManualMerchant] = useState('');
   const [manualAmount, setManualAmount] = useState('');
   const [manualCategory, setManualCategory] = useState('food'); // Default
+  const [manualPaymentMethod, setManualPaymentMethod] = useState<PaymentMethod>('cash');
 
-  // Edit Limit Modal
+  // Budget Planner Modal
   const [showEditLimit, setShowEditLimit] = useState(false);
-  const [limitInput, setLimitInput] = useState('');
+  const [limitMode, setLimitMode] = useState<'auto' | 'manual'>('auto');
+  const [monthlyIncome, setMonthlyIncome] = useState('');
+  const [savingsPercentage, setSavingsPercentage] = useState('20');
+  const [manualLimitInput, setManualLimitInput] = useState('');
+
+  useEffect(() => {
+    if (showEditLimit && profile) {
+      setMonthlyIncome(profile.monthly_income ? formatNumber(profile.monthly_income.toString()) : '');
+      setManualLimitInput(profile.daily_budget ? formatNumber(profile.daily_budget.toString()) : '');
+    }
+  }, [showEditLimit, profile]);
+
+  const formatNumber = (val: string) => {
+    const num = val.replace(/[^0-9]/g, '');
+    if (!num) return '';
+    return parseInt(num, 10).toLocaleString('id-ID');
+  };
+
+  const parseNumber = (val: string) => {
+    return parseInt(val.replace(/\./g, ''), 10);
+  };
 
   const handleScanComplete = (data: any) => {
     setScanMerchant(data.merchant || '');
-    setScanAmount(data.amount ? data.amount.toString() : '');
+    setScanAmount(data.amount ? formatNumber(data.amount.toString()) : '');
     setScanCategory(data.category || 'other');
     setShowConfirmModal(true);
   };
@@ -75,7 +96,7 @@ export default function DashboardScreen() {
       showAlert('Error', 'User belum login!');
       return;
     }
-    const amt = parseInt(scanAmount);
+    const amt = parseNumber(scanAmount);
     if (isNaN(amt) || amt <= 0) {
       showAlert('Oops', 'Nominal tidak valid!');
       return;
@@ -84,9 +105,9 @@ export default function DashboardScreen() {
     const result = await useTransactionStore.getState().addTransaction({
       user_id: user.id,
       amount: amt,
-      merchant_name: scanMerchant.trim() || 'Unknown',
+      merchant_name: scanMerchant.trim() || 'QRIS Scan',
       category: scanCategory,
-      payment_method: 'qris',
+      payment_method: scanPaymentMethod,
       note: 'Via OCR Scan',
       receipt_url: null,
       is_impulse: false,
@@ -108,7 +129,7 @@ export default function DashboardScreen() {
       showAlert('Error', 'User belum login!');
       return;
     }
-    const amt = parseInt(manualAmount);
+    const amt = parseNumber(manualAmount);
     if (isNaN(amt) || amt <= 0) {
       showAlert('Oops', 'Nominal tidak valid! Masukkan angka.');
       return;
@@ -119,7 +140,7 @@ export default function DashboardScreen() {
       amount: amt,
       merchant_name: manualMerchant.trim() || 'Manual Entry',
       category: manualCategory,
-      payment_method: 'cash',
+      payment_method: manualPaymentMethod,
       note: 'Manual Record',
       receipt_url: null,
       is_impulse: false,
@@ -139,16 +160,31 @@ export default function DashboardScreen() {
   };
 
   const handleSaveLimit = async () => {
-    const amt = parseInt(limitInput);
-    if (isNaN(amt) || amt < 0) {
-      showAlert('Oops', 'Nominal tidak valid!');
+    let finalDailyLimit = 0;
+    const incomeAmt = parseNumber(monthlyIncome) || 0;
+
+    if (limitMode === 'auto') {
+      const pct = parseFloat(savingsPercentage) || 0;
+      const savings = Math.floor(incomeAmt * (pct / 100));
+      const budget = incomeAmt - savings;
+      finalDailyLimit = Math.floor(budget / 30);
+    } else {
+      finalDailyLimit = parseNumber(manualLimitInput) || 0;
+    }
+
+    if (isNaN(finalDailyLimit) || finalDailyLimit <= 0) {
+      showAlert('Oops', 'Nominal target tidak valid!');
       return;
     }
     
-    await useAuthStore.getState().updateProfile({ daily_budget: amt });
+    await useAuthStore.getState().updateProfile({ 
+      daily_budget: finalDailyLimit,
+      monthly_income: incomeAmt
+    });
+    
     setShowEditLimit(false);
     safeHaptics('success');
-    showAlert('Sukses!', `Limit harian diubah menjadi Rp${amt.toLocaleString('id-ID')}`);
+    showAlert('Sukses!', `Limit harian diubah menjadi Rp${finalDailyLimit.toLocaleString('id-ID')}`);
   };
 
   const onRefresh = useCallback(async () => {
@@ -205,7 +241,6 @@ export default function DashboardScreen() {
           <TouchableOpacity 
             style={[styles.editBadge, { backgroundColor: UPlanColors.primarySubtle }]}
             onPress={() => {
-              setLimitInput(budget.dailyLimit.toString());
               setShowEditLimit(true);
             }}
           >
@@ -381,20 +416,33 @@ export default function DashboardScreen() {
                 <View style={styles.formGroup}>
                   <Text style={[styles.label, { color: theme.textSecondary }]}>Nominal (Rp)</Text>
                   <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
-                    value={scanAmount} onChangeText={setScanAmount} placeholder="50000" placeholderTextColor={theme.textMuted} keyboardType="numeric" />
+                    value={scanAmount} onChangeText={(text) => setScanAmount(formatNumber(text))} placeholder="50.000" placeholderTextColor={theme.textMuted} keyboardType="numeric" />
                 </View>
 
                 <View style={styles.formGroup}>
                   <Text style={[styles.label, { color: theme.textSecondary }]}>Kategori</Text>
-                  <View style={styles.categoryRow}>
-                    {Object.entries(CATEGORIES).slice(0, 4).map(([key, cat]) => (
-                      <TouchableOpacity key={key} style={[styles.catBadge, scanCategory === key && { backgroundColor: cat.bgColor, borderColor: cat.color }]}
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryRow}>
+                    {Object.entries(CATEGORIES).map(([key, cat]) => (
+                      <TouchableOpacity key={key} style={[styles.catBadge, { marginRight: 8 }, scanCategory === key && { backgroundColor: cat.bgColor, borderColor: cat.color }]}
                         onPress={() => setScanCategory(key)}>
                         <FontAwesome6 name={cat.icon} size={12} color={scanCategory === key ? cat.color : theme.textMuted} />
                         <Text style={[styles.catText, { color: scanCategory === key ? cat.color : theme.textMuted }]}>{cat.label}</Text>
                       </TouchableOpacity>
                     ))}
-                  </View>
+                  </ScrollView>
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>Metode Pembayaran</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryRow}>
+                    {PAYMENT_METHODS.map((method) => (
+                      <TouchableOpacity key={method.key} style={[styles.catBadge, { marginRight: 8 }, scanPaymentMethod === method.key && { backgroundColor: theme.primary + '20', borderColor: theme.primary }]}
+                        onPress={() => setScanPaymentMethod(method.key as PaymentMethod)}>
+                        <FontAwesome6 name={method.icon} size={12} color={scanPaymentMethod === method.key ? theme.primary : theme.textMuted} />
+                        <Text style={[styles.catText, { color: scanPaymentMethod === method.key ? theme.primary : theme.textMuted }]}>{method.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
                 </View>
                 
                 <TouchableOpacity style={styles.saveBtn} onPress={handleSaveScan} activeOpacity={0.7}>
@@ -430,21 +478,46 @@ export default function DashboardScreen() {
 
                 <View style={styles.formGroup}>
                   <Text style={[styles.label, { color: theme.textSecondary }]}>Nominal (Rp)</Text>
-                  <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
-                    value={manualAmount} onChangeText={setManualAmount} placeholder="25000" placeholderTextColor={theme.textMuted} keyboardType="numeric" />
+                  <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text, marginBottom: 8 }]}
+                    value={manualAmount} onChangeText={(text) => setManualAmount(formatNumber(text))} placeholder="25.000" placeholderTextColor={theme.textMuted} keyboardType="numeric" />
+                  
+                  <View style={styles.chipRow}>
+                    {['10000', '25000', '50000', '100000'].map(val => (
+                      <TouchableOpacity key={val} style={[styles.chip, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}
+                        onPress={() => {
+                          const current = parseNumber(manualAmount) || 0;
+                          setManualAmount(formatNumber((current + parseInt(val)).toString()));
+                        }}>
+                        <Text style={[styles.chipText, { color: theme.textSecondary }]}>+{parseInt(val)/1000}K</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                 </View>
 
                 <View style={styles.formGroup}>
                   <Text style={[styles.label, { color: theme.textSecondary }]}>Kategori</Text>
-                  <View style={styles.categoryRow}>
-                    {Object.entries(CATEGORIES).slice(0, 4).map(([key, cat]) => (
-                      <TouchableOpacity key={key} style={[styles.catBadge, manualCategory === key && { backgroundColor: cat.bgColor, borderColor: cat.color }]}
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryRow}>
+                    {Object.entries(CATEGORIES).map(([key, cat]) => (
+                      <TouchableOpacity key={key} style={[styles.catBadge, { marginRight: 8 }, manualCategory === key && { backgroundColor: cat.bgColor, borderColor: cat.color }]}
                         onPress={() => setManualCategory(key)}>
                         <FontAwesome6 name={cat.icon} size={12} color={manualCategory === key ? cat.color : theme.textMuted} />
                         <Text style={[styles.catText, { color: manualCategory === key ? cat.color : theme.textMuted }]}>{cat.label}</Text>
                       </TouchableOpacity>
                     ))}
-                  </View>
+                  </ScrollView>
+                </View>
+
+                <View style={styles.formGroup}>
+                  <Text style={[styles.label, { color: theme.textSecondary }]}>Metode Pembayaran</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryRow}>
+                    {PAYMENT_METHODS.map((method) => (
+                      <TouchableOpacity key={method.key} style={[styles.catBadge, { marginRight: 8 }, manualPaymentMethod === method.key && { backgroundColor: theme.primary + '20', borderColor: theme.primary }]}
+                        onPress={() => setManualPaymentMethod(method.key as PaymentMethod)}>
+                        <FontAwesome6 name={method.icon} size={12} color={manualPaymentMethod === method.key ? theme.primary : theme.textMuted} />
+                        <Text style={[styles.catText, { color: manualPaymentMethod === method.key ? theme.primary : theme.textMuted }]}>{method.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
                 </View>
 
                 <TouchableOpacity style={styles.saveBtn} onPress={handleSaveManual} activeOpacity={0.7}>
@@ -459,30 +532,104 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
-      {/* Edit Limit Modal */}
+      {/* Budget Planner Modal */}
       <Modal visible={showEditLimit} animationType="fade" transparent>
         <View style={styles.modalOverlayCenter}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%', alignItems: 'center' }}>
-            <View style={[styles.modalCenterContent, { backgroundColor: theme.card }]}>
-              <View style={styles.modalHeader}>
-                <Text style={[styles.modalTitle, { color: theme.text }]}>Ubah Limit Harian</Text>
-                <TouchableOpacity onPress={() => setShowEditLimit(false)}>
-                  <FontAwesome6 name="xmark" size={20} color={theme.textMuted} />
+            <View style={[styles.modalCenterContent, { backgroundColor: theme.card, maxHeight: '90%' }]}>
+              <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 10 }}>
+                <View style={styles.modalHeader}>
+                  <Text style={[styles.modalTitle, { color: theme.text }]}>Budget Planner</Text>
+                  <TouchableOpacity onPress={() => setShowEditLimit(false)}>
+                    <FontAwesome6 name="xmark" size={20} color={theme.textMuted} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Mode Selector */}
+                <View style={{ flexDirection: 'row', backgroundColor: theme.surfaceAlt, borderRadius: 12, padding: 4, marginBottom: 20 }}>
+                  <TouchableOpacity style={{ flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8, backgroundColor: limitMode === 'auto' ? theme.card : 'transparent', shadowColor: limitMode === 'auto' ? '#000' : 'transparent', shadowOpacity: 0.1, shadowRadius: 4, elevation: limitMode === 'auto' ? 2 : 0 }} onPress={() => setLimitMode('auto')}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: limitMode === 'auto' ? theme.text : theme.textMuted }}>Otomatis</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={{ flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8, backgroundColor: limitMode === 'manual' ? theme.card : 'transparent', shadowColor: limitMode === 'manual' ? '#000' : 'transparent', shadowOpacity: 0.1, shadowRadius: 4, elevation: limitMode === 'manual' ? 2 : 0 }} onPress={() => setLimitMode('manual')}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: limitMode === 'manual' ? theme.text : theme.textMuted }}>Manual</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {limitMode === 'auto' ? (
+                  <View>
+                    <View style={styles.formGroup}>
+                      <Text style={[styles.label, { color: theme.textSecondary }]}>Pemasukan Bulanan (Rp)</Text>
+                      <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text, fontSize: 18, fontWeight: 'bold' }]}
+                        value={monthlyIncome} onChangeText={(v) => setMonthlyIncome(formatNumber(v))} placeholder="5.000.000" placeholderTextColor={theme.textMuted} keyboardType="numeric" />
+                    </View>
+
+                    <View style={styles.formGroup}>
+                      <Text style={[styles.label, { color: theme.textSecondary }]}>Target Tabungan</Text>
+                      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+                        {['10', '20', '30'].map(pct => (
+                          <TouchableOpacity key={pct} onPress={() => setSavingsPercentage(pct)}
+                            style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: savingsPercentage === pct ? UPlanColors.primarySubtle : theme.surfaceAlt, borderWidth: 1, borderColor: savingsPercentage === pct ? UPlanColors.primary : theme.border }}>
+                            <Text style={{ fontWeight: '600', color: savingsPercentage === pct ? UPlanColors.primary : theme.textSecondary }}>{pct}%</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: theme.input, borderRadius: 10, borderWidth: 1, borderColor: theme.inputBorder, paddingHorizontal: 12 }}>
+                        <TextInput style={{ flex: 1, height: 44, color: theme.text, fontWeight: '600' }} value={savingsPercentage} onChangeText={setSavingsPercentage} keyboardType="numeric" placeholder="Atau ketik %" placeholderTextColor={theme.textMuted} />
+                        <Text style={{ color: theme.textSecondary, fontWeight: '600' }}>%</Text>
+                      </View>
+                    </View>
+
+                    {/* Projections */}
+                    {(() => {
+                      const incomeAmt = parseNumber(monthlyIncome) || 0;
+                      const pct = parseFloat(savingsPercentage) || 0;
+                      const monthlySavings = Math.floor(incomeAmt * (pct / 100));
+                      const autoLimit = Math.floor((incomeAmt - monthlySavings) / 30);
+                      
+                      return (
+                        <View style={{ marginTop: 10, marginBottom: 20 }}>
+                          <View style={{ backgroundColor: theme.surfaceAlt, borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: theme.border }}>
+                            <Text style={{ color: theme.textSecondary, fontSize: 13, marginBottom: 4 }}>Rekomendasi Limit Harian</Text>
+                            <Text style={{ color: UPlanColors.primary, fontSize: 24, fontWeight: '800' }}>Rp{autoLimit.toLocaleString('id-ID')}</Text>
+                          </View>
+
+                          <Text style={{ color: theme.text, fontSize: 16, fontWeight: '700', marginBottom: 12 }}>Proyeksi Tabungan Anda 📈</Text>
+                          <View style={{ gap: 8 }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: theme.border }}>
+                              <Text style={{ color: theme.textSecondary }}>1 Bulan</Text>
+                              <Text style={{ color: theme.text, fontWeight: '600' }}>Rp{monthlySavings.toLocaleString('id-ID')}</Text>
+                            </View>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: theme.border }}>
+                              <Text style={{ color: theme.textSecondary }}>6 Bulan</Text>
+                              <Text style={{ color: theme.text, fontWeight: '600' }}>Rp{(monthlySavings * 6).toLocaleString('id-ID')}</Text>
+                            </View>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8 }}>
+                              <Text style={{ color: theme.textSecondary }}>1 Tahun</Text>
+                              <Text style={{ color: UPlanColors.success, fontWeight: '700' }}>Rp{(monthlySavings * 12).toLocaleString('id-ID')}</Text>
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })()}
+                  </View>
+                ) : (
+                  <View style={styles.formGroup}>
+                    <Text style={[styles.label, { color: theme.textSecondary }]}>Nominal Target Harian (Rp)</Text>
+                    <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text, fontSize: 18, fontWeight: 'bold' }]}
+                      value={manualLimitInput} onChangeText={(v) => setManualLimitInput(formatNumber(v))} placeholder="160000" placeholderTextColor={theme.textMuted} keyboardType="numeric" />
+                    <Text style={{ color: theme.textMuted, fontSize: 13, marginTop: 8 }}>
+                      Tentukan sendiri batas pengeluaran maksimal Anda per harinya.
+                    </Text>
+                  </View>
+                )}
+
+                <TouchableOpacity style={styles.saveBtn} onPress={handleSaveLimit} activeOpacity={0.7}>
+                  <LinearGradient pointerEvents="none" colors={[UPlanColors.primary, UPlanColors.primaryLight]} style={styles.saveBtnGradient}
+                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+                    <Text style={styles.saveBtnText}>Simpan & Terapkan</Text>
+                  </LinearGradient>
                 </TouchableOpacity>
-              </View>
-
-              <View style={styles.formGroup}>
-                <Text style={[styles.label, { color: theme.textSecondary }]}>Nominal Target (Rp)</Text>
-                <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
-                  value={limitInput} onChangeText={setLimitInput} placeholder="160000" placeholderTextColor={theme.textMuted} keyboardType="numeric" />
-              </View>
-
-              <TouchableOpacity style={styles.saveBtn} onPress={handleSaveLimit} activeOpacity={0.7}>
-                <LinearGradient pointerEvents="none" colors={[UPlanColors.primary, UPlanColors.primaryLight]} style={styles.saveBtnGradient}
-                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-                  <Text style={styles.saveBtnText}>Simpan Limit Baru</Text>
-                </LinearGradient>
-              </TouchableOpacity>
+              </ScrollView>
             </View>
           </KeyboardAvoidingView>
         </View>
@@ -643,4 +790,11 @@ const styles = StyleSheet.create({
   emptyState: { alignItems: 'center', paddingVertical: 32 },
   emptyIcon: { fontSize: 32, marginBottom: 8 },
   emptyText: { fontSize: 13 },
+
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+    borderWidth: 1,
+  },
+  chipText: { fontSize: 13, fontWeight: '600' },
 });

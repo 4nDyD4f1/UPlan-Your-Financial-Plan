@@ -203,8 +203,16 @@ function extractAmount(text: string): number | null {
 
 function parseIndonesianNumber(str: string): number | null {
   if (!str) return null;
-  // Remove dots (thousand separators in Indonesian) and replace comma with dot
-  let cleaned = str.replace(/\./g, '').replace(/,/g, '');
+  
+  // Clean string
+  let cleaned = str.trim();
+  
+  // 1. Remove trailing decimals like ,00 or .00 (a comma/dot followed by exactly 2 digits at the very end)
+  cleaned = cleaned.replace(/[,.][0-9]{2}$/, '');
+  
+  // 2. Remove all remaining dots and commas (assumed to be thousands separators)
+  cleaned = cleaned.replace(/[.,]/g, '');
+  
   const num = parseInt(cleaned, 10);
   return isNaN(num) ? null : num;
 }

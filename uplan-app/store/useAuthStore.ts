@@ -9,6 +9,8 @@ import {
   getOrCreateUser,
   getUserProfile,
   updateUserProfile,
+  hasSession,
+  setSession,
   showAlert,
   type DBUser,
 } from '../lib/database';
@@ -22,6 +24,7 @@ interface AuthState {
 
   // Actions
   initialize: () => Promise<void>;
+  signInAsGuest: (name: string) => Promise<{ error: string | null }>;
   signInWithGoogle: () => Promise<void>;
   signInWithPassword: (email: string, password: string) => Promise<{ error: string | null }>;
   signUpWithPassword: (email: string, password: string) => Promise<{ error: string | null }>;
@@ -41,24 +44,52 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   initialize: async () => {
     try {
       const dbUser = await initDatabase();
-      const user = { id: dbUser.id, email: dbUser.email };
-      const session = { access_token: 'local_session', user };
-      set({ user, session, profile: dbUser, initialized: true });
-      console.log('[Auth] Initialized with user:', dbUser.id);
+      const sessionActive = await hasSession();
+      
+      if (sessionActive) {
+        const user = { id: dbUser.id, email: dbUser.email };
+        const session = { access_token: 'local_session', user };
+        set({ user, session, profile: dbUser, initialized: true });
+        console.log('[Auth] Restored session for user:', dbUser.id);
+      } else {
+        // No session → show login screen
+        set({ user: null, session: null, profile: null, initialized: true });
+        console.log('[Auth] No active session. Showing login.');
+      }
     } catch (error) {
       console.error('[Auth] Init error:', error);
       set({ initialized: true });
     }
   },
 
+  signInAsGuest: async (name: string) => {
+    set({ loading: true });
+    try {
+      const dbUser = await getOrCreateUser('guest@uplan.app');
+      await updateUserProfile(dbUser.id, { full_name: name || 'Guest' });
+      await setSession(true);
+      
+      const user = { id: dbUser.id, email: dbUser.email };
+      const session = { access_token: 'local_session', user };
+      set({ user, session, profile: { ...dbUser, full_name: name || 'Guest' }, loading: false });
+    } catch (error: any) {
+      console.error(error);
+      set({ loading: false });
+      return { error: error.message };
+    }
+    return { error: null };
+  },
+
   signInWithGoogle: async () => {
     set({ loading: true });
     try {
       const dbUser = await getOrCreateUser('google_user@uplan.app');
+      await setSession(true);
       const user = { id: dbUser.id, email: dbUser.email };
+      const session = { access_token: 'local_session', user };
       set({
         user,
-        session: { access_token: 'local_session', user },
+        session,
         profile: dbUser,
         loading: false,
       });
@@ -130,6 +161,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: async () => {
+    try {
+      await setSession(false);
+    } catch (e) {
+      console.error('[Auth] Clear session error:', e);
+    }
     set({
       user: null,
       session: null,

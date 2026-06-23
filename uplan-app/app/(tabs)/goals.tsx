@@ -232,10 +232,10 @@ export default function GoalsScreen() {
           );
         })}
 
-        <TouchableOpacity style={[styles.addGoalBtn, { borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)' }]}
+        <TouchableOpacity style={[styles.addGoalBtn, { borderColor: UPlanColors.primary, borderStyle: 'dashed', borderWidth: 1 }]}
           onPress={openAddModal}>
-          <FontAwesome6 name="plus-circle" size={16} color={theme.textMuted} />
-          <Text style={[styles.addGoalBtnText, { color: theme.textMuted }]}>Add New Goal</Text>
+          <Text style={{ fontSize: 20, fontWeight: '800', color: UPlanColors.primary }}>+</Text>
+          <Text style={[styles.addGoalBtnText, { color: UPlanColors.primary }]}>Add New Goal</Text>
         </TouchableOpacity>
         
         <View style={{ height: 40 }} />
@@ -258,8 +258,46 @@ export default function GoalsScreen() {
               <ScrollView contentContainerStyle={{ paddingBottom: 20 }} keyboardShouldPersistTaps="handled">
                 <View style={styles.formGroup}>
                   <Text style={[styles.label, { color: theme.textSecondary }]}>Emoji</Text>
-                  <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text }]}
-                    value={emoji} onChangeText={setEmoji} maxLength={4} />
+                  
+                  <Text style={{ fontSize: 11, color: theme.textMuted, marginBottom: 6 }}>Elektronik</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                    {['💻', '📱', '🎧', '⌚', '🖥️', '📷', '🎮', '🕹️'].map(e => (
+                      <TouchableOpacity key={e} onPress={() => setEmoji(e)}
+                        style={{ width: 40, height: 40, borderRadius: 10, justifyContent: 'center', alignItems: 'center',
+                          backgroundColor: emoji === e ? UPlanColors.primarySubtle : theme.surfaceAlt,
+                          borderWidth: emoji === e ? 2 : 1, borderColor: emoji === e ? UPlanColors.primary : theme.border }}>
+                        <Text style={{ fontSize: 20 }}>{e}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Text style={{ fontSize: 11, color: theme.textMuted, marginBottom: 6 }}>Travel & Kendaraan</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                    {['✈️', '🚗', '🏍️', '🏠', '🏖️', '⛺', '🚀', '🛳️'].map(e => (
+                      <TouchableOpacity key={e} onPress={() => setEmoji(e)}
+                        style={{ width: 40, height: 40, borderRadius: 10, justifyContent: 'center', alignItems: 'center',
+                          backgroundColor: emoji === e ? UPlanColors.primarySubtle : theme.surfaceAlt,
+                          borderWidth: emoji === e ? 2 : 1, borderColor: emoji === e ? UPlanColors.primary : theme.border }}>
+                        <Text style={{ fontSize: 20 }}>{e}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Text style={{ fontSize: 11, color: theme.textMuted, marginBottom: 6 }}>Pendidikan & Lainnya</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                    {['📚', '🎓', '💰', '💎', '👟', '👗', '🎸', '🎯'].map(e => (
+                      <TouchableOpacity key={e} onPress={() => setEmoji(e)}
+                        style={{ width: 40, height: 40, borderRadius: 10, justifyContent: 'center', alignItems: 'center',
+                          backgroundColor: emoji === e ? UPlanColors.primarySubtle : theme.surfaceAlt,
+                          borderWidth: emoji === e ? 2 : 1, borderColor: emoji === e ? UPlanColors.primary : theme.border }}>
+                        <Text style={{ fontSize: 20 }}>{e}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+
+                  <Text style={{ fontSize: 11, color: theme.textMuted, marginBottom: 6 }}>Atau ketik manual:</Text>
+                  <TextInput style={[styles.input, { backgroundColor: theme.input, borderColor: theme.inputBorder, color: theme.text, textAlign: 'center', fontSize: 24 }]}
+                    value={emoji} onChangeText={setEmoji} maxLength={4} placeholder="🎯" placeholderTextColor={theme.textMuted} />
                 </View>
                 
                 <View style={styles.formGroup}>

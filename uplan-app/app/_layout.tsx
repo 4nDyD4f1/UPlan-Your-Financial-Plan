@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, Redirect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useAuthStore } from '../store/useAuthStore';
@@ -38,12 +38,11 @@ export default function RootLayout() {
           animation: 'slide_from_right',
         }}
       >
-        {!session ? (
-          <Stack.Screen name="(auth)" options={{ animation: 'fade' }} />
-        ) : (
-          <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
-        )}
+        <Stack.Screen name="(auth)" options={{ animation: 'fade' }} />
+        <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
       </Stack>
+      {initialized && !session && <Redirect href="/(auth)/login" />}
+      {initialized && session && <Redirect href="/(tabs)" />}
     </>
   );
 }

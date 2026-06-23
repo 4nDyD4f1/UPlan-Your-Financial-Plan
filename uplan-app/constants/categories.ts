@@ -32,8 +32,8 @@ export const CATEGORIES: Record<CategoryKey, CategoryDef> = {
   },
   coffee: {
     key: 'coffee',
-    label: 'Kopi',
-    labelEn: 'Coffee',
+    label: 'Minuman',
+    labelEn: 'Drinks',
     icon: 'mug-hot',
     color: '#A88264',
     bgColor: 'rgba(168, 130, 100, 0.12)',
@@ -93,8 +93,15 @@ export const CATEGORY_LIST = Object.values(CATEGORIES);
 export const PAYMENT_METHODS = [
   { key: 'qris', label: 'QRIS', icon: 'qrcode' },
   { key: 'cash', label: 'Tunai', icon: 'money-bill' },
-  { key: 'transfer', label: 'Transfer', icon: 'building-columns' },
-  { key: 'card', label: 'Kartu', icon: 'credit-card' },
+  { key: 'bca', label: 'BCA', icon: 'building-columns' },
+  { key: 'bni', label: 'BNI', icon: 'building-columns' },
+  { key: 'mandiri', label: 'Mandiri', icon: 'building-columns' },
+  { key: 'bri', label: 'BRI', icon: 'building-columns' },
+  { key: 'gopay', label: 'GoPay', icon: 'wallet' },
+  { key: 'ovo', label: 'OVO', icon: 'wallet' },
+  { key: 'dana', label: 'DANA', icon: 'wallet' },
+  { key: 'shopeepay', label: 'ShopeePay', icon: 'wallet' },
+  { key: 'card', label: 'Kartu Kredit', icon: 'credit-card' },
 ] as const;
 
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number]['key'];

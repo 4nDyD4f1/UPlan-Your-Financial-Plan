@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
   user: 'uplan_db_user',
   transactions: 'uplan_db_transactions',
   goals: 'uplan_db_goals',
+  session: 'uplan_db_session',
 };
 
 // ─── Type Definitions ────────────────────────────────────────
@@ -165,7 +166,8 @@ export async function getUserProfile(): Promise<DBUser | null> {
   }
 }
 
-export async function updateUserProfile(updates: Partial<DBUser>): Promise<DBUser> {
+export async function updateUserProfile(idOrUpdates: string | Partial<DBUser>, maybeUpdates?: Partial<DBUser>): Promise<DBUser> {
+  const updates = typeof idOrUpdates === 'string' ? (maybeUpdates || {}) : idOrUpdates;
   const current = await getOrCreateUser();
   const updated: DBUser = {
     ...current,
@@ -309,4 +311,21 @@ export async function initDatabase(): Promise<DBUser> {
     _initialized = true;
   }
   return user;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SESSION MANAGEMENT
+// ═══════════════════════════════════════════════════════════════
+
+export async function hasSession(): Promise<boolean> {
+  const session = await getItem(STORAGE_KEYS.session);
+  return session === 'active';
+}
+
+export async function setSession(active: boolean): Promise<void> {
+  if (active) {
+    await setItem(STORAGE_KEYS.session, 'active');
+  } else {
+    await AsyncStorage.removeItem(STORAGE_KEYS.session);
+  }
 }
