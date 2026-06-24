@@ -222,23 +222,39 @@ function extractMerchant(text: string): string {
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 2);
   
   // Common patterns for merchant name in receipts
-  const skipWords = /^(total|jumlah|bayar|tanggal|date|waktu|time|no\.|ref|resi|struk|receipt|kasir|cashier|change|kembalian|tunai|cash|debit|kredit|credit|qris|dana|gopay|ovo|shopeepay|linkaja|rincian|berhasil|sukses|status|metode|\d+$)/i;
-  
-  // 1. Look for single-line "Kepada: MerchantName"
+  const skipWords = /^(total|jumlah|bayar|tanggal|date|waktu|time|no\.|ref|resi|struk|receipt|kasir|cashier|change|kembalian|tunai|cash|debit|kredit|credit|qris|dana|gopay|ovo|shopeepay|linkaja|rincian|berhasil|sukses|status|metode|pembayaran ke|pengakuisisi|lokasi merchant|merchant pan|terminal id|dari|customer pan|rrn|pan|terminal|lokasi|penerima|tujuan|merchant|nama|bca|bcp|\d+$)/i;
+
+  // 1. Look for single-line "Kepada: MerchantName" or "Pembayaran ke MerchantName"
   for (const line of lines) {
-    const merchantMatch = line.match(/(?:kepada|merchant|nama|to|tujuan|penerima|bayar ke)\s*[:]+\s*(.+)/i);
+    if (/pan|terminal|lokasi|pengakuisisi|customer/i.test(line)) continue;
+
+    const merchantMatch = line.match(/(?:kepada|merchant|nama|to|tujuan|penerima|bayar ke|pembayaran ke)\s*[:]*\s+(.+)/i);
     if (merchantMatch) {
-      const name = merchantMatch[1].trim();
-      if (name.length > 1) return name;
+      let name = merchantMatch[1].trim();
+      // Clean up common terminal/EDC suffixes (e.g. " - JAK0620 - QRIS")
+      name = name.replace(/\s*-\s*[A-Z0-9]+\s*-\s*QRIS/i, '');
+      name = name.replace(/\s*-\s*QRIS/i, '');
+      if (name.length > 1 && !/^(bca|bcp)$/i.test(name)) return name;
     }
   }
 
-  // 2. Look for two-line "Bayar Ke \n MerchantName" (ShopeePay/Gopay style)
+  // 2. Look for two-line "Bayar Ke \n MerchantName" (ShopeePay/Gopay/BCA columns style)
   for (let i = 0; i < lines.length - 1; i++) {
-    if (/(?:kepada|merchant|nama|to|tujuan|penerima|bayar ke)/i.test(lines[i])) {
-      const nextLine = lines[i + 1].trim();
-      if (nextLine.length > 1 && !skipWords.test(nextLine)) {
-        return nextLine;
+    if (/(?:kepada|merchant|nama|to|tujuan|penerima|bayar ke|pembayaran ke)/i.test(lines[i])) {
+      // Search forward for the first valid value (handles column parsing)
+      for (let j = i + 1; j < lines.length; j++) {
+        let cleanCandidate = lines[j].trim().replace(/^[<>\-=\s]+|[<>\-=\s]+$/g, '');
+        
+        if (cleanCandidate.length < 2) continue;
+        if (/^\d{1,2}[:/]\d{1,2}/.test(cleanCandidate)) continue; // ignore times/dates
+        if ((cleanCandidate.match(/[a-zA-Z]/g) || []).length < 3) continue; // ignore garbage
+        if (/pembayaran.*berhasil/i.test(cleanCandidate)) continue;
+        if (skipWords.test(cleanCandidate)) continue; // ignore keys
+        
+        // Found the value!
+        cleanCandidate = cleanCandidate.replace(/\s*-\s*[A-Z0-9]+\s*-\s*QRIS/i, '');
+        cleanCandidate = cleanCandidate.replace(/\s*-\s*QRIS/i, '');
+        return cleanCandidate;
       }
     }
   }
@@ -246,12 +262,22 @@ function extractMerchant(text: string): string {
   // 3. Fallback: First non-skip line that looks like a name
   for (const line of lines) {
     // Remove symbols like '<', '>', '-', etc that might be attached
-    const cleanLine = line.replace(/^[<>\-=\s]+|[<>\-=\s]+$/g, '');
+    let cleanLine = line.replace(/^[<>\-=\s]+|[<>\-=\s]+$/g, '');
+    
+    // Ignore lines that just say "Pembayaran QRIS Berhasil"
+    if (/pembayaran.*berhasil/i.test(cleanLine)) continue;
+    
+    // Ignore lines that look like times or dates (e.g., "8:22", "24/06")
+    if (/^\d{1,2}[:/]\d{1,2}/.test(cleanLine)) continue;
+
+    // Ignore lines that have very few letters (e.g., "8:22 C Д")
+    const letterCount = (cleanLine.match(/[a-zA-Z]/g) || []).length;
+    if (letterCount < 3) continue;
     
     if (cleanLine.length > 2 && cleanLine.length < 50 && !skipWords.test(cleanLine) && !/^\d+$/.test(cleanLine)) {
-      if (/[a-zA-Z]/.test(cleanLine)) {
-        return cleanLine;
-      }
+      cleanLine = cleanLine.replace(/\s*-\s*[A-Z0-9]+\s*-\s*QRIS/i, '');
+      cleanLine = cleanLine.replace(/\s*-\s*QRIS/i, '');
+      return cleanLine;
     }
   }
 
